@@ -18,19 +18,26 @@
 
 ```
 scripts/
-  feiyue-grinder/      # 脚本 + sxz-bank 后端(Docker+SQLite) + tests(jsdom)
-  feiyue-solver/           # 脚本 + tests + dev 辅助(gen.mjs/e2e.sh)
-deploy/                   # 本机一键部署到 feiyue 的脚本(见下)
-CONVENTIONS.md            # 命名 / 版本 / @updateURL / 部署 规范
+  feiyue-grinder/    # 飞跃·刷课 Grinder + sxz-bank 后端(Docker+SQLite) + tests(jsdom)
+  feiyue-solver/     # 飞跃·解题 Solver + tests + dev 辅助(gen.mjs/e2e.sh)
+deploy/              # 本机一键部署到 feiyue 的脚本(见下)
+docs/                # 开发文档 + 踩坑记录
 ```
 
 ## 开发 & 部署
 
-1. 直接在 `scripts/<名>/` 下编辑 `.user.js`，改动后**自增 `@version`**。
-2. 跑测试：`cd scripts/feiyue-grinder/tests && npm i && node --test *.mjs`；`cd scripts/feiyue-solver && node --test test-extract.mjs`。
-3. 提交：`git commit -am "feat(sxz): ... v2.9.13"`。
+1. 直接在 `scripts/<名>/` 下编辑 `.user.js`，改动后**自增 `@version`**（改被测纯函数要同步 `feiyue-grinder/tests/sxz-core.mjs`）。
+2. 跑测试：`cd scripts/feiyue-grinder/tests && npm i && node --test *.mjs`（78 项）。
+3. 提交：`git commit -am "feat(grinder): ... v2.9.14"`。
 4. 部署到 feiyue：`bash deploy/deploy.sh`（本机执行，经 win-wsl2 二跳推到 huawei2 的 `~/public-scripts/`）。
 
 > 部署必须从本机跑：huawei2（华为云）只能经 win-wsl2 内网二跳访问，GitHub 云端 CI 到不了它，故不用 CI 自动部署。
 
-详见 [CONVENTIONS.md](./CONVENTIONS.md)。
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [CLAUDE.md](./CLAUDE.md) | 在本仓工作的铁律 / 命令 / 链路（Claude Code 入口） |
+| [CONVENTIONS.md](./CONVENTIONS.md) | 命名（工具系 `-er`）/ 版本 / `@updateURL` / 身份 / 部署 规范 |
+| [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md) | 两脚本架构 / 答题来源链 / sxz-bank / 测试 / 部署 / CDP 调试 |
+| [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) | **★ 踩过的坑 & 解法**（改动前必读：全选A / 题库0命中 / 暂停失效 / 不自动更新 / 二跳部署 …） |
