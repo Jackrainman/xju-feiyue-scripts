@@ -8,7 +8,7 @@
 scripts/feiyue-solver/    飞跃·解题 Solver — CourseGrading(Java/OJ) AI 解题(原 cg-ai-solver/xiji)
 scripts/feiyue-grinder/   飞跃·刷课 Grinder — 华为实习汁(小学期)自动刷课(原 huawei-sxz-shuake)
   ├─ feiyue-grinder.user.js
-  ├─ sxz-bank/            共享云题库后端(stdlib http.server + SQLite + Docker)
+  ├─ feiyue-grinder-bank/            共享云题库后端(stdlib http.server + SQLite + Docker)
   └─ tests/               jsdom + node:test
 deploy/                   本机一键部署到 feiyue 的脚本
 docs/DEVELOPMENT.md       架构 / 开发流程 / 测试 / 部署 / CDP 调试
@@ -25,7 +25,7 @@ CONVENTIONS.md            命名 / 版本 / @updateURL / 身份 规范
 3. **不要改已发布脚本的 `@name` / `@namespace` / 技术 ID**——Tampermonkey 以此为身份，改了会被当成新脚本、用户丢配置（API Key 等）。仅在「无安装用户（内测期）」时可对齐改名。
 4. **部署只能从本机跑**：`huawei2`（华为云）只能经 `win-wsl2` 内网二跳访问，GitHub 云端 CI 到不了它。用 `deploy/deploy.sh`，不要尝试 CI 自动部署。
 5. **API Key / 账号绝不进仓库**，只存浏览器本地 GM。提交前 `grep -rE 'sk-[A-Za-z0-9]{20,}' scripts/` 自查。
-6. **sxz-bank 的题库数据**（`/data/bank.db`）在 Docker 卷里，重建容器**勿删卷**。
+6. **feiyue-grinder-bank 的题库数据**（`/data/bank.db`）在 Docker 卷里，重建容器**勿删卷**。
 
 ## 常用命令
 

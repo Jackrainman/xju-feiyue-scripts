@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # 华为 shixizhi 共享题库(内容版):SQLite + stdlib http.server,无第三方依赖。
 # 存"正确选项的内容文本"(非字母,防选项乱序);搜题按题干模糊+精准,返回正确选项文本。
-# 路由(经 nginx /sxz-bank/ 反代):
+# 路由(经 nginx /feiyue-grinder-bank/ 反代):
 #   GET  /search?q=<题干>&type=<题型>  -> {"texts":["..."],"qtype":"单选题","votes":3,"stem":"..."} 或 {"texts":null}
 #   POST /add  {"stem","qtype","texts":["正确选项内容",...]}  -> {"ok":true,"votes":N}
 #   GET  /stats -> {"rows":N,"stems":M}   GET /health -> {"ok":true}
@@ -129,5 +129,5 @@ class H(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     init()
-    print("sxz-bank(content) on :%d db=%s" % (PORT, DB), flush=True)
+    print("feiyue-grinder-bank(content) on :%d db=%s" % (PORT, DB), flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()

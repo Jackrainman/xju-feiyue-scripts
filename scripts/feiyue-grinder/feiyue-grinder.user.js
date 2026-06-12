@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         飞跃·刷课 Grinder
 // @namespace    https://feiyue.selab.top/feiyue-grinder
-// @version      2.9.13
+// @version      2.9.14
 // @updateURL    https://feiyue.selab.top/feiyue-grinder.user.js
 // @downloadURL  https://feiyue.selab.top/feiyue-grinder.user.js
 // @description  三合一全自动:视频(自动播,倍速/静音可调)+课件(滚动翻完每一页)+随堂测验(AI答题 GPT5.5/DeepSeek 可切,AI优先+题库兜底)。面板置于顶层窗口可任意拖动,引擎跑在课程 iframe 内,经 postMessage 通信。UI 全 SVG(无 emoji)。登录(短信验证码)用华为原生界面手动完成。API Key 仅存本地(GM)。
@@ -178,8 +178,8 @@
    *  引擎(运行在 shixizhi 主学习帧):视频/课件/测验/下一讲
    * ============================================================ */
   const STATE = { running: false, timer: null, busy: false, done: 0, retries: 0, note: '待机', noteKind: '', cwSince: 0, correctByStem: {} };
-  // ===== 云题库(共享,SQLite+Docker on huawei2,经 nginx /sxz-bank/)=====
-  const BANK_API = 'https://feiyue.selab.top/sxz-bank';
+  // ===== 云题库(共享,SQLite+Docker on huawei2,经 nginx /feiyue-grinder-bank/)=====
+  const BANK_API = 'https://feiyue.selab.top/feiyue-grinder-bank';
   function bankRemoteSearch(stem, type) { // 模糊搜索,返回【正确选项内容数组】;4s 超时,任何失败返回 null
     return new Promise((resolve) => {
       try {

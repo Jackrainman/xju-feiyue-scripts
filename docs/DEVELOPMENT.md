@@ -36,8 +36,8 @@
 ### 1.5 结课考试模块（`solveExam`）
 进入前 `examPreflight`（题库 `/health` 探活 + Key 检查）→ 逐题作答（单选不自动跳，下一题=`.subject-btn` 按文字找）→ 答题卡补全 → **防废卷**（命中<40% 不交卷、暂停）→ **答题用时<10min 等够再交** → `examSubmit`（点 `.hand-exams-btn` + `examConfirmBtn` 点确认弹窗，排除「继续作答」）。`CFG.force`=强制重答（已答/已满分也重做）。`@updateURL` 真实点击「开始考试/再考一次」→ `armExam`（GM 标记 3 分钟）→ 新标签自动托管（无需先开设置）。
 
-### 1.6 后端 `sxz-bank/`
-`bank_server.py`（stdlib `http.server` + `sqlite3`，无三方依赖）+ `Dockerfile`。生产跑 huawei2，nginx `/sxz-bank/` 反代 → `https://feiyue.selab.top/sxz-bank`。
+### 1.6 后端 `feiyue-grinder-bank/`
+`bank_server.py`（stdlib `http.server` + `sqlite3`，无三方依赖）+ `Dockerfile`。生产跑 huawei2，nginx `/feiyue-grinder-bank/` 反代 → `https://feiyue.selab.top/feiyue-grinder-bank`。
 - 表 `answers(stem_norm, stem, qtype, ans_texts JSON, ans_key, votes, UNIQUE(stem_norm,ans_key))`，**存正确选项内容**（防乱序），`norm()` 去空白+标点+小写。
 - `GET /search?q=&type=`（精确 stem_norm 或双向子串模糊 ratio≥0.82，votes 最高）、`POST /add{stem,qtype,texts[]}`（UPSERT votes++，只入满分确认的）、`GET /stats`、`GET /health`。
 
@@ -74,7 +74,7 @@
 
 - `deploy/deploy.sh [--dry-run] [过滤]`：遍历 `scripts/*/*.user.js` 推到 huawei2。
 - `deploy/ensure-nginx-locations.sh`：在 huawei2 以 root 跑，幂等加精确 location（**新增脚本首次必跑**，否则该 URL 落到 SPA fallback 返回 HTML）。
-- `deploy/deploy-sxz-bank.sh`：仅改后端时用，重建容器**保留 `/data` 卷**。
+- `deploy/deploy-bank.sh`：仅改后端时用，重建容器**保留 `/data` 卷**。
 - Cloudflare 边缘缓存 4h → `?v=<版本>` 验证回源。
 
 ---

@@ -89,7 +89,7 @@
 
 ---
 
-## 四、共享云题库 sxz-bank
+## 四、共享云题库 feiyue-grinder-bank
 
 - **选项乱序导致按字母选错** → 题库**存正确选项内容**（非字母），`lettersFromTexts` 在当前题按内容（归一化精确 + 高重叠子串）匹配出字母。
 - **题库被脏数据污染** → 只入「满分确认正确」的题；`UNIQUE(stem_norm,ans_key)` 去重 votes++。
