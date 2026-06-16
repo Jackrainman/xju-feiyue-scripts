@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         飞跃·解题 Solver
 // @namespace    https://feiyue.selab.top/feiyue-solver
-// @version      2.4.1
-// @description  希冀(CourseGrading/educg) 编程/填空/接口题：提取题目→DeepSeek 生成→自动提交→读判题结果；一键串行开刷所有作业(校验链接+排序)、开刷前自动抽取未抽题作业、失败读样例多版本重试、自动跳题。v2.3：流式响应(实时看到"思考/生成/卡住"，杜绝长生成时的"无响应")、铃铛日志诊断面板(特殊情况新手引导式提醒+一键复制诊断日志去提 issue)。v2.4：同题上下文压缩(mod-2)+主模型连错3次后升级强模型(重置单题时间预算)。
+// @version      2.4.2
+// @description  希冀(CourseGrading/educg) 编程/填空/接口题：提取题目→DeepSeek 生成→自动提交→读判题结果；一键串行开刷所有作业(校验链接+排序)、开刷前自动抽取未抽题作业、失败读样例多版本重试、自动跳题。v2.3：流式响应(实时看到"思考/生成/卡住"，杜绝长生成时的"无响应")、铃铛日志诊断面板(特殊情况新手引导式提醒+一键复制诊断日志)。v2.4：同题上下文压缩(mod-2)+主模型连错3次后升级强模型(重置单题时间预算)。
 // @author       winbeau
 // @homepageURL  https://github.com/Jackrainman/xju-feiyue-scripts
 // @supportURL   https://github.com/Jackrainman/xju-feiyue-scripts/issues
@@ -39,8 +39,7 @@
         THINKING: 'ds_thinking', AUTO_SUBMIT: 'cg_auto_submit', MAX_ATTEMPTS: 'cg_max_attempts',
         SKIP_PASSED: 'cg_skip_passed', GRIND: 'cg_grind_state', MODELS_CACHE: 'ds_models_cache', LOG: 'cgai_log',
     };
-    const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '2.4.1';
-    const SUPPORT_URL = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.supportURL) || 'https://github.com/Jackrainman/xju-feiyue-scripts/issues';
+    const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '2.4.2';
     const DEFAULTS = { baseURL: 'https://api.deepseek.com', model: 'deepseek-chat', strongModel: 'deepseek-reasoner' };
     const MODEL_SUGGEST = ['deepseek-chat', 'deepseek-reasoner', 'gpt-5.5', 'gpt-5.4-pro'];
     const OJ = location.origin;
@@ -133,7 +132,6 @@
         bell:     svg('<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>', 15),
         copy:     svg('<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>', 14),
         trash:    svg('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>', 14),
-        ext:      svg('<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>', 14),
     };
     const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -1015,7 +1013,7 @@
         logListEl.innerHTML = LOG.buf.map(e =>
             `<div class="cgai-logrow ${e.level}"><span class="lt">${hhmmss(e.t)}</span><span class="li">${LEVELS[e.level] || '·'}</span>` +
             `<span class="lm">${esc(e.msg)}${e.detail ? `<span class="ld">${esc(e.detail)}</span>` : ''}</span></div>`
-        ).join('') || '<div class="cgai-empty">暂无日志。开始解题后这里会逐步记录「调用模型 / 思考 / 生成 / 提交 / 判题」，卡住或报错也会在此说明，方便定位与提 issue。</div>';
+        ).join('') || '<div class="cgai-empty">暂无日志。开始解题后这里会逐步记录「调用模型 / 思考 / 生成 / 提交 / 判题」，卡住或报错也会在此说明，方便定位排查。</div>';
         if (panel && panel.querySelector('#cgai-log').classList.contains('open')) logListEl.scrollTop = logListEl.scrollHeight;
     }
     function openLog() {
@@ -1110,10 +1108,10 @@
                 <div class="cgai-btns"><button class="cgai-btn cgai-btn-primary" id="cfg-save">保存</button><button class="cgai-btn cgai-btn-ghost" id="cfg-cancel">取消</button></div>
             </div>
             <div id="cgai-log">
-                <div class="cfg-head"><div><b>日志 / 诊断</b> <span class="sub">记录每一步 · 卡住/报错有说明 · 可一键复制去提 issue</span></div><span class="cgai-ic" id="log-x" title="关闭">${ICON.minus}</span></div>
+                <div class="cfg-head"><div><b>日志 / 诊断</b> <span class="sub">记录每一步 · 卡住/报错有说明 · 可一键复制诊断日志</span></div><span class="cgai-ic" id="log-x" title="关闭">${ICON.minus}</span></div>
                 <div id="cgai-banners"></div>
                 <div id="cgai-loglist"></div>
-                <div class="cgai-btns" style="margin-top:11px"><button class="cgai-btn cgai-btn-primary" id="log-copy">${ICON.copy}<span>复制诊断日志</span></button><button class="cgai-btn cgai-btn-ghost" id="log-issue">${ICON.ext}<span>去提 issue</span></button><button class="cgai-btn cgai-btn-ghost" id="log-clear" title="清空日志" style="flex:0 0 auto">${ICON.trash}</button></div>
+                <div class="cgai-btns" style="margin-top:11px"><button class="cgai-btn cgai-btn-primary" id="log-copy">${ICON.copy}<span>复制诊断日志</span></button><button class="cgai-btn cgai-btn-ghost" id="log-clear" title="清空日志" style="flex:0 0 auto">${ICON.trash}</button></div>
             </div>`;
         const arrow = document.createElement('div'); arrow.id = 'cgai-arrow';
         arrow.innerHTML = ICON.arrowUp + '<span>首次使用：点这里或右上角齿轮，配置 API Key</span>';
@@ -1152,7 +1150,6 @@
         panel.querySelector('#cgai-bell').onclick = openLog;
         panel.querySelector('#log-x').onclick = closeLog;
         panel.querySelector('#log-copy').onclick = copyDiagnostics;
-        panel.querySelector('#log-issue').onclick = () => window.open(SUPPORT_URL, '_blank', 'noopener');
         panel.querySelector('#log-clear').onclick = () => { LOG.clear(); };
         makeDraggable(panel, panel.querySelector('#cgai-head'));
 
