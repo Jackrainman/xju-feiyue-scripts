@@ -140,6 +140,16 @@ console.log('\n[同题上下文压缩 compactMessages]');
     ok('异常分支：保留无效输出 + 「上次输出有问题」提示', cb.length === 4 && /不是有效Java/.test(cb[2].content) && /上次输出有问题/.test(cb[3].content));
     ok('压缩幂等(对应 escalate compactBefore 双触发)', JSON.stringify(api.compactMessages(c, prob)) === JSON.stringify(c));
     ok('仅[system,题目]安全返回2元', api.compactMessages(base, prob).length === 2);
+    // 末轮贴 deadline：messages 以 assistant 结尾、无后续 user 反馈 → compactBefore 不能产出以 assistant 收尾的对话(否则强模型升级版 payload 末尾 assistant，部分服务商 400)
+    const accTail = base.concat([
+        { role: 'assistant', content: 'CODE_A' }, { role: 'user', content: 'FB_A' },
+        { role: 'assistant', content: 'CODE_TAIL' },
+    ]);
+    const ctail = api.compactMessages(accTail, prob);
+    ok('末尾 assistant：对话以 user 结束(不留 assistant 收尾)', ctail[ctail.length - 1].role === 'user');
+    ok('末尾 assistant：仍保留最近一版输出 CODE_TAIL', ctail.some(m => m.content === 'CODE_TAIL'));
+    ok('末尾 assistant：补的收尾 user 非空', ctail[ctail.length - 1].content.length > 0);
+    ok('末尾 assistant：补 user 后再压幂等', JSON.stringify(api.compactMessages(ctail, prob)) === JSON.stringify(ctail));
 }
 
 console.log(`\n=== ${pass} 通过, ${fail} 失败 ===`);

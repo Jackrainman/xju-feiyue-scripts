@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         飞跃·解题 Solver
 // @namespace    https://feiyue.selab.top/feiyue-solver
-// @version      2.4.2
+// @version      2.4.3
 // @description  希冀(CourseGrading/educg) 编程/填空/接口题：提取题目→DeepSeek 生成→自动提交→读判题结果；一键串行开刷所有作业(校验链接+排序)、开刷前自动抽取未抽题作业、失败读样例多版本重试、自动跳题。v2.3：流式响应(实时看到"思考/生成/卡住"，杜绝长生成时的"无响应")、铃铛日志诊断面板(特殊情况新手引导式提醒+一键复制诊断日志)。v2.4：同题上下文压缩(mod-2)+主模型连错3次后升级强模型(重置单题时间预算)。
 // @author       winbeau
 // @homepageURL  https://github.com/XjuSelab/xju-feiyue-scripts
@@ -39,7 +39,7 @@
         THINKING: 'ds_thinking', AUTO_SUBMIT: 'cg_auto_submit', MAX_ATTEMPTS: 'cg_max_attempts',
         SKIP_PASSED: 'cg_skip_passed', GRIND: 'cg_grind_state', MODELS_CACHE: 'ds_models_cache', LOG: 'cgai_log',
     };
-    const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '2.4.2';
+    const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '2.4.3';
     const DEFAULTS = { baseURL: 'https://api.deepseek.com', model: 'deepseek-chat', strongModel: 'deepseek-reasoner' };
     const MODEL_SUGGEST = ['deepseek-chat', 'deepseek-reasoner', 'gpt-5.5', 'gpt-5.4-pro'];
     const OJ = location.origin;
@@ -415,10 +415,16 @@
         let items = parseAssignProblems(html, assignID);
         if (!items.length && needsDraw(html)) { // 开刷前自动抽题（仅对"未抽过"的作业）：POST randomAssign.jsp + doChoose=true，再重读题目链接
             tickStatus(`作业 ${assignID} 未抽题，正在自动抽取…`);
+            LOG.push('info', `作业 ${assignID} 未抽题，自动抽取一次`);
             await gmPostForm(`${OJ}/assignment/randomAssign.jsp`, `assignID=${assignID}&doChoose=true`);
-            await sleep(800);
-            html = await gmGetText(url);
-            items = parseAssignProblems(html, assignID);
+            // 轮询回读，直到读到题目或页面变为「重新抽取题目」(抽题已生效)；服务器慢时不过早返回空，避免用户二次「开刷」触发重抽换题、清掉已有进度
+            for (let tries = 0; tries < 6; tries++) {
+                await sleep(800);
+                html = await gmGetText(url);
+                items = parseAssignProblems(html, assignID);
+                if (items.length || /重新抽取题目/.test(html)) break;
+            }
+            if (!items.length) LOG.push('warn', `作业 ${assignID} 抽题后仍未读到题目，可能抽取失败或服务器较慢；请勿重复「开刷」以免重抽换题`);
         }
         return items;
     }
@@ -717,6 +723,7 @@
         const out = base.slice(); // [system, 题目]
         if (lastAssistant) out.push(lastAssistant); // 最近一版输出（即便无效也带上，反馈里已说明问题）
         if (lastUserAfter) out.push(lastUserAfter); // 最近一次反馈（verdict 报错 / feedbackFromHtml / 「上次输出有问题…」）
+        else if (lastAssistant) out.push({ role: 'user', content: '上次提交未通过，请修正后重新输出完整、可编译运行的答案。' }); // 末轮贴 deadline 时 messages 以 assistant 收尾、无后续反馈：补一句保证对话以 user 结束，否则升级强模型那版 payload 以 assistant 结尾→部分服务商(如 deepseek-reasoner) 返回 400
         return out;
     }
     // 多版本：同对话累积「代码→错误样例→纠正代码→…」；每连错2次压缩上下文；连错≥3次后追加版换强模型(重置预算+干净上下文)
