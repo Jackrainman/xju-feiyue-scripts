@@ -16,7 +16,7 @@ w.__CGAI_EXPOSE__ = true;
 w.GM_addStyle = () => {}; w.GM_getValue = (k, d) => (k in store ? store[k] : d); w.GM_setValue = (k, v) => { store[k] = v; };
 w.GM_deleteValue = k => { delete store[k]; }; w.GM_registerMenuCommand = () => {}; w.GM_xmlhttpRequest = () => {};
 w.GM_setClipboard = t => { clip = t; };
-w.GM_info = { script: { version: '2.3.0', supportURL: 'https://github.com/Jackrainman/xju-feiyue-scripts/issues' } };
+w.GM_info = { script: { version: '2.3.0', supportURL: 'https://github.com/XjuSelab/xju-feiyue-scripts/issues' } };
 w.TextDecoder = TextDecoder; w.DataTransfer = function () { this.items = { add() {} }; this.files = []; };
 w.eval(src);
 if (!w.document.getElementById('cgai-panel')) w.document.dispatchEvent(new w.Event('DOMContentLoaded'));

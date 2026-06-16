@@ -43,7 +43,7 @@ function shimInit(seedKey) {
         window.GM_deleteValue = k=>{ delete store[k]; };
         window.GM_registerMenuCommand = ()=>{};
         window.GM_setClipboard = ()=>{};
-        window.GM_info = { script:{ version:'2.3.0', supportURL:'https://github.com/Jackrainman/xju-feiyue-scripts/issues' } };
+        window.GM_info = { script:{ version:'2.3.0', supportURL:'https://github.com/XjuSelab/xju-feiyue-scripts/issues' } };
         window.GM_xmlhttpRequest = function(o){
             const u = o.url||'';
             if (/chat\\/completions/.test(u)){

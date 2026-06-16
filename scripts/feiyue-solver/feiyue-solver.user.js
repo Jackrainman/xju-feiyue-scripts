@@ -4,8 +4,8 @@
 // @version      2.4.2
 // @description  希冀(CourseGrading/educg) 编程/填空/接口题：提取题目→DeepSeek 生成→自动提交→读判题结果；一键串行开刷所有作业(校验链接+排序)、开刷前自动抽取未抽题作业、失败读样例多版本重试、自动跳题。v2.3：流式响应(实时看到"思考/生成/卡住"，杜绝长生成时的"无响应")、铃铛日志诊断面板(特殊情况新手引导式提醒+一键复制诊断日志)。v2.4：同题上下文压缩(mod-2)+主模型连错3次后升级强模型(重置单题时间预算)。
 // @author       winbeau
-// @homepageURL  https://github.com/Jackrainman/xju-feiyue-scripts
-// @supportURL   https://github.com/Jackrainman/xju-feiyue-scripts/issues
+// @homepageURL  https://github.com/XjuSelab/xju-feiyue-scripts
+// @supportURL   https://github.com/XjuSelab/xju-feiyue-scripts/issues
 // @downloadURL  https://feiyue.selab.top/feiyue-solver.user.js
 // @updateURL    https://feiyue.selab.top/feiyue-solver.user.js
 // @match        http://10.109.120.139/*
