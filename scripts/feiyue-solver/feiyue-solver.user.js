@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         飞跃·解题 Solver
 // @namespace    https://feiyue.selab.top/feiyue-solver
-// @version      2.2.4
-// @description  希冀(CourseGrading/educg) 编程/填空/接口题：提取题目→DeepSeek 生成→自动提交→读判题结果；一键串行开刷所有作业(校验链接+排序)、失败读样例多版本重试、自动跳题。
+// @version      2.4.2
+// @description  希冀(CourseGrading/educg) 编程/填空/接口题：提取题目→DeepSeek 生成→自动提交→读判题结果；一键串行开刷所有作业(校验链接+排序)、开刷前自动抽取未抽题作业、失败读样例多版本重试、自动跳题。v2.3：流式响应(实时看到"思考/生成/卡住"，杜绝长生成时的"无响应")、铃铛日志诊断面板(特殊情况新手引导式提醒+一键复制诊断日志)。v2.4：同题上下文压缩(mod-2)+主模型连错3次后升级强模型(重置单题时间预算)。
 // @author       winbeau
 // @homepageURL  https://github.com/XjuSelab/xju-feiyue-scripts
 // @supportURL   https://github.com/XjuSelab/xju-feiyue-scripts/issues
@@ -16,7 +16,11 @@
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_addStyle
+// @grant        GM_setClipboard
 // @connect      api.deepseek.com
+// @connect      token-plan-cn.xiaomimimo.com
+// @connect      ark.cn-beijing.volces.com
+// @connect      aiapis.help
 // @connect      10.109.120.139
 // @connect      self
 // @connect      *
@@ -33,8 +37,9 @@
     const STORE = {
         KEY: 'ds_api_key', BASE_URL: 'ds_base_url', MODEL: 'ds_model', STRONG_MODEL: 'ds_strong_model',
         THINKING: 'ds_thinking', AUTO_SUBMIT: 'cg_auto_submit', MAX_ATTEMPTS: 'cg_max_attempts',
-        SKIP_PASSED: 'cg_skip_passed', GRIND: 'cg_grind_state', MODELS_CACHE: 'ds_models_cache',
+        SKIP_PASSED: 'cg_skip_passed', GRIND: 'cg_grind_state', MODELS_CACHE: 'ds_models_cache', LOG: 'cgai_log',
     };
+    const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '2.4.2';
     const DEFAULTS = { baseURL: 'https://api.deepseek.com', model: 'deepseek-chat', strongModel: 'deepseek-reasoner' };
     const MODEL_SUGGEST = ['deepseek-chat', 'deepseek-reasoner', 'gpt-5.5', 'gpt-5.4-pro'];
     const OJ = location.origin;
@@ -55,6 +60,44 @@
     const setGrind = g => GM_setValue(STORE.GRIND, JSON.stringify(g));
     const clearGrind = () => GM_deleteValue(STORE.GRIND);
     const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const fmtN = n => n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n);
+    const hhmmss = t => { const d = new Date(t); const p = x => String(x).padStart(2, '0'); return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
+
+    /* ============================ 日志 / 诊断（持久化，跨页开刷可追溯） ============================ */
+    // 只记录「离散里程碑事件」（解题/调用/思考完成/生成/提交/判题/错误），不写逐 token——逐 token 的实时进度走状态行。
+    const LEVELS = { info: '·', think: '🧠', gen: '✎', ok: '✓', warn: '⚠', err: '✕' };
+    const LOG = {
+        MAX: 200, buf: [],
+        load() { try { this.buf = JSON.parse(GM_getValue(STORE.LOG, '') || '[]') || []; } catch (_) { this.buf = []; } if (!Array.isArray(this.buf)) this.buf = []; },
+        save() { try { GM_setValue(STORE.LOG, JSON.stringify(this.buf.slice(-this.MAX))); } catch (_) {} },
+        push(level, msg, detail) {
+            const e = { t: Date.now(), level, msg: String(msg || ''), detail: detail ? String(detail).slice(0, 1200) : '' };
+            this.buf.push(e); if (this.buf.length > this.MAX) this.buf.splice(0, this.buf.length - this.MAX);
+            this.save();
+            if (level === 'warn' || level === 'err') bumpAttention();
+            renderLog();
+            return e;
+        },
+        clear() { this.buf = []; this.save(); renderLog(); },
+    };
+
+    // 特殊情况「新手引导式」提醒：每类一条（同类去重），点开铃铛即见，附操作按钮
+    const BANNER_DEFS = {
+        noKey:   { lvl: 'warn', title: '还没配置 API Key', body: '点右上角齿轮配置 Base URL 与 API Key（支持 DeepSeek / GPT / 任意 OpenAI 兼容服务）。', act: '去配置', go: 'config' },
+        auth:    { lvl: 'err',  title: 'API Key 无效 (401)', body: '检查 Key 是否复制完整、未过期，且与 Base URL 的服务商匹配。', act: '去配置', go: 'config' },
+        connect: { lvl: 'err',  title: '连不上 API 服务器', body: '①脚本猫需「允许」到该域名的跨域连接（首次会弹窗，务必点允许）②确认该 API 在你的网络可达 ③Base URL 是否正确（GPT 代理通常要带 /v1）。', act: '去配置', go: 'config' },
+        model:   { lvl: 'warn', title: '该模型不被接口支持', body: '当前模型不在该服务商/接口的支持列表（如火山「编程计划」仅支持部分模型）。换一个兼容模型后重试。', act: '去配置', go: 'config' },
+        timeout: { lvl: 'warn', title: '请求超时', body: '模型长时间未给出完整响应。可重试、换更快的模型，或检查网络稳定性。', act: '看日志', go: 'log' },
+        stall:   { lvl: 'warn', title: '数据流疑似卡住', body: '已较长时间未收到新数据（不是在思考，而是真的停了）。可停止后重试，或更换模型/检查网络。', act: '看日志', go: 'log' },
+        empty:   { lvl: 'warn', title: '返回内容为空', body: '模型只输出了思考没给正文，或 max_tokens 被思考耗尽。可关思考模式或换模型重试。', act: '看日志', go: 'log' },
+    };
+    let activeBanners = {};            // kind -> { extra }
+    let unseen = 0;                    // 未读 warn/err 数（铃铛红点）
+    function setBanner(kind, extra) { if (!BANNER_DEFS[kind]) return; activeBanners[kind] = { extra: extra || '' }; bumpAttention(); renderLog(); }
+    function clearBanner(kind) { if (activeBanners[kind]) { delete activeBanners[kind]; renderLog(); } }
+    function clearTransientBanners() { ['auth', 'connect', 'model', 'timeout', 'stall', 'empty'].forEach(clearBanner); }
+    function bumpAttention() { unseen++; updateBell(); if (bellEl) bellEl.classList.add('cgai-attn'); }
+    function updateBell() { if (!bellDot) return; bellDot.style.display = unseen > 0 ? 'flex' : 'none'; bellDot.textContent = unseen > 9 ? '9+' : String(unseen); }
 
     function pageType() {
         const h = location.pathname + location.search;
@@ -86,6 +129,9 @@
         file:     svg('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v5h5"/><path d="M16 13H8"/><path d="M16 17H8"/>', 14),
         arrowUp:  svg('<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>', 15),
         refresh:  svg('<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/>', 12),
+        bell:     svg('<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>', 15),
+        copy:     svg('<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>', 14),
+        trash:    svg('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>', 14),
     };
     const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -228,6 +274,37 @@
         #cgai-head .cgai-ic.cgai-attn{color:var(--cg-link);animation:cgaiattn 1.1s ease-in-out infinite}
         @keyframes cgaiattn{0%,100%{box-shadow:0 0 0 0 rgba(35,131,226,.5)}50%{box-shadow:0 0 0 6px rgba(35,131,226,0)}}
         .cgai-field .hint{font-size:11px;color:var(--cg-faint);line-height:1.4}
+        /* 铃铛红点（未读 warn/err） */
+        #cgai-head .cgai-ic{position:relative}
+        .cgai-dot{position:absolute;top:-3px;right:-3px;min-width:15px;height:15px;padding:0 3px;display:none;align-items:center;justify-content:center;
+            background:var(--cg-err-fg);color:#fff;border-radius:999px;font-size:9px;font-weight:700;line-height:1;border:1.5px solid var(--cg-bg-subtle);font-variant-numeric:tabular-nums}
+        /* 日志 / 诊断浮层 */
+        #cgai-log{position:absolute;inset:0;z-index:7;background:var(--cg-bg);display:none;flex-direction:column;padding:15px}
+        #cgai-log.open{display:flex}
+        #cgai-log .cfg-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+        #cgai-log .cfg-head b{font-size:15px;font-weight:600}
+        #cgai-log .cfg-head .sub{font-size:11px;color:var(--cg-faint)}
+        #cgai-loglist{flex:1;overflow:auto;border:1px solid var(--cg-border);border-radius:var(--cg-r-md);padding:6px 11px;background:var(--cg-bg-subtle)}
+        .cgai-logrow{display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--cg-border);font-size:12px;line-height:1.45;align-items:flex-start}
+        .cgai-logrow:last-child{border-bottom:none}
+        .cgai-logrow .lt{color:var(--cg-faint);font-family:var(--cg-mono);font-size:11px;font-variant-numeric:tabular-nums;flex:0 0 auto;padding-top:1px}
+        .cgai-logrow .li{flex:0 0 auto;width:14px;text-align:center}
+        .cgai-logrow .lm{flex:1;color:var(--cg-text);min-width:0;word-break:break-word}
+        .cgai-logrow .ld{display:block;margin-top:2px;font-family:var(--cg-mono);font-size:11px;color:var(--cg-muted);white-space:pre-wrap;word-break:break-word}
+        .cgai-logrow.warn .lm{color:var(--cg-busy-fg)} .cgai-logrow.err .lm{color:var(--cg-err-fg)}
+        .cgai-logrow.ok .lm{color:var(--cg-ok-fg)} .cgai-logrow.think .lm{color:var(--cg-link)} .cgai-logrow.gen .lm{color:var(--cg-accent)}
+        .cgai-empty{color:var(--cg-faint);font-size:12px;padding:14px 4px;line-height:1.6}
+        /* 特殊情况引导 banner */
+        #cgai-banners:empty{display:none}
+        #cgai-banners{margin-bottom:10px;display:flex;flex-direction:column;gap:8px}
+        .cgai-banner{display:flex;gap:9px;padding:10px 11px;border-radius:var(--cg-r-md);border:1px solid var(--cg-border)}
+        .cgai-banner.warn{background:var(--cg-busy-bg);border-color:var(--cg-busy-bd)} .cgai-banner.warn .bi{color:var(--cg-busy-fg)}
+        .cgai-banner.err{background:var(--cg-err-bg);border-color:var(--cg-err-bd)} .cgai-banner.err .bi{color:var(--cg-err-fg)}
+        .cgai-banner .bi{flex:0 0 auto;padding-top:1px}
+        .cgai-banner .bc{flex:1;min-width:0;font-size:12px;line-height:1.5}
+        .cgai-banner .bc b{font-size:12.5px;font-weight:600;display:block;margin-bottom:2px}
+        .cgai-banner .bx{margin-top:4px;font-family:var(--cg-mono);font-size:11px;color:var(--cg-muted);word-break:break-all}
+        .cgai-banner .bgo{margin-top:7px}
     `);
 
     /* ============================ 文本工具 ============================ */
@@ -318,9 +395,32 @@
         items.sort((a, b) => a.page.localeCompare(b.page) || a.proNum - b.proNum);
         return items;
     }
+    // 未抽题的作业（有"抽取题目"按钮、还没抽过）开刷前自动抽一次；已抽过的（显示"重新抽取题目"）绝不重抽——重抽会换题、清掉已有进度
+    function needsDraw(html) {
+        return /name=["']?randomAssignFORM/i.test(html) && /value=["']抽取题目["']/.test(html) && !/重新抽取题目/.test(html);
+    }
+    function gmPostForm(url, data) {
+        return new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: 'POST', url, data, headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                responseType: 'arraybuffer', timeout: 25000,
+                onload: r => { try { resolve(new TextDecoder('gbk').decode(new Uint8Array(r.response))); } catch (_) { resolve(''); } },
+                onerror: () => resolve(''), ontimeout: () => resolve(''),
+            });
+        });
+    }
     async function fetchAssignProblems(assignID, courseID) {
         const url = `${OJ}/assignment/index.jsp?${courseID ? 'courseID=' + courseID + '&' : ''}assignID=${assignID}`;
-        return parseAssignProblems(await gmGetText(url), assignID);
+        let html = await gmGetText(url);
+        let items = parseAssignProblems(html, assignID);
+        if (!items.length && needsDraw(html)) { // 开刷前自动抽题（仅对"未抽过"的作业）：POST randomAssign.jsp + doChoose=true，再重读题目链接
+            tickStatus(`作业 ${assignID} 未抽题，正在自动抽取…`);
+            await gmPostForm(`${OJ}/assignment/randomAssign.jsp`, `assignID=${assignID}&doChoose=true`);
+            await sleep(800);
+            html = await gmGetText(url);
+            items = parseAssignProblems(html, assignID);
+        }
+        return items;
     }
     async function buildQueue() {
         let assignList = isProblemPage() ? discoverAssignList() : [];
@@ -361,25 +461,73 @@
         }
         return [{ role: 'system', content: sys }, { role: 'user', content: user }];
     }
-    function callLLM(messages, opts, apiKey, timeoutMs) {
+    const STALL_FIRST = 20; // 秒：流中断超过该阈值视作「可能卡住」（区别于正常思考延迟）
+    /* ---- SSE 解析（纯函数，可单测）：从「累积到目前的全文」整体重建 content/reasoning ---- */
+    // 每次拿到的是累积全文，整段重解析：尾部不完整的一行 JSON.parse 失败被跳过，下次补全再解。
+    function parseSSE(buf) {
+        let content = '', reasoning = '', sawSSE = false, done = false, errObj = null;
+        const lines = String(buf || '').split('\n');
+        for (const raw of lines) {
+            const s = raw.replace(/\r$/, '').replace(/^\s+/, '');
+            if (!/^data:/.test(s)) continue;
+            sawSSE = true;
+            const d = s.slice(5).trim();
+            if (!d) continue;
+            if (d === '[DONE]') { done = true; continue; }
+            let o; try { o = JSON.parse(d); } catch (_) { continue; } // 尾部半行，下次补全再解
+            if (o.error) { errObj = o.error; continue; }
+            const ch = o.choices && o.choices[0];
+            const delta = ch && (ch.delta || ch.message);
+            if (delta) {
+                if (typeof delta.content === 'string') content += delta.content;
+                if (typeof delta.reasoning_content === 'string') reasoning += delta.reasoning_content;
+            }
+        }
+        return { content, reasoning, sawSSE, done, errObj };
+    }
+    const llmErr = (msg, kind, extra) => Object.assign(new Error(msg), { kind: kind || 'http', extra: extra || '' });
+
+    // 流式调用：边收边解，实时回调 hooks.onProgress({phase,reasoningLen,contentLen}) 与 hooks.onStall(secs,hadData)。
+    // 解决根因：stream:false 时长生成会整段缓冲、连接空闲常被掐 → 「无响应」；流式让数据持续流入，并能区分「思考 / 生成 / 真卡住」。
+    function callLLM(messages, opts, apiKey, timeoutMs, hooks) {
         const baseURL = getBaseURL(), host = baseURL.replace(/^https?:\/\//, '');
-        const payload = { model: opts.model, messages, stream: false, temperature: opts.temperature ?? 0, max_tokens: 8192 };
+        const payload = { model: opts.model, messages, stream: true, temperature: opts.temperature ?? 0, max_tokens: 8192 };
         if (/deepseek/i.test(baseURL)) payload.thinking = { type: opts.thinking ? 'enabled' : 'disabled' };
         return new Promise((resolve, reject) => {
+            let lastLen = -1, lastDataAt = Date.now(), hadData = false, settled = false, stallT = null;
+            const fin = fn => { if (settled) return; settled = true; if (stallT) clearInterval(stallT); fn(); };
+            const onText = txt => {
+                const r = parseSSE(txt);
+                if (!r.sawSSE) return;
+                const len = r.content.length + r.reasoning.length;
+                if (len !== lastLen) { lastLen = len; lastDataAt = Date.now(); if (len > 0) hadData = true; }
+                if (hooks && hooks.onProgress) hooks.onProgress({ phase: r.content ? 'gen' : 'think', reasoningLen: r.reasoning.length, contentLen: r.content.length });
+            };
+            stallT = setInterval(() => { const gap = Math.round((Date.now() - lastDataAt) / 1000); if (gap >= STALL_FIRST && hooks && hooks.onStall) hooks.onStall(gap, hadData); }, 1000);
             GM_xmlhttpRequest({
-                method: 'POST', url: baseURL + '/chat/completions', data: JSON.stringify(payload), responseType: 'text', timeout: Math.max(8000, timeoutMs || 120000),
-                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-                onload: r => {
-                    if (r.status === 401) return reject(new Error('API Key 无效 (401)，请到配置页检查'));
-                    if (r.status === 0) return reject(new Error(`连不上 ${host}（浏览器能否访问该 API？脚本猫是否已允许跨域连接？）`));
-                    if (r.status !== 200) return reject(new Error(`API ${r.status}: ` + (r.responseText || '').slice(0, 160)));
-                    let d; try { d = JSON.parse(r.responseText); } catch (e) { return reject(new Error('无法解析响应')); }
-                    const c = d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
-                    if (!c) return reject(new Error('返回内容为空（max_tokens 不足或思考耗尽）'));
+                method: 'POST', url: baseURL + '/chat/completions', data: JSON.stringify(payload),
+                responseType: 'text', timeout: Math.max(8000, timeoutMs || 120000),
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey, 'Accept': 'text/event-stream' },
+                onprogress: e => { try { const t = e && (typeof e.responseText === 'string' ? e.responseText : (typeof e.response === 'string' ? e.response : null)); if (t != null) onText(t); } catch (_) {} },
+                onload: r => fin(() => {
+                    if (r.status === 401) return reject(llmErr('API Key 无效 (401)，请到配置页检查', 'auth'));
+                    if (r.status === 0) return reject(llmErr(`连不上 ${host}（浏览器能否访问该 API？脚本猫是否已允许跨域连接？）`, 'connect'));
+                    const body = r.responseText || '', p = parseSSE(body);
+                    if (p.sawSSE) {                       // 正常流式
+                        if (p.content) return resolve(p.content);
+                        if (p.errObj) return reject(llmErr(`${host} 返回错误：${p.errObj.message || p.errObj.code || JSON.stringify(p.errObj)}`, /model/i.test(JSON.stringify(p.errObj)) ? 'model' : 'http'));
+                        return reject(llmErr('返回内容为空（仅有思考无正文，或 max_tokens 被思考耗尽）', 'empty'));
+                    }
+                    // 非 SSE：服务商忽略了 stream:true，按普通 JSON 处理（成功或错误体）
+                    let d = null; try { d = JSON.parse(body); } catch (_) {}
+                    if (d && d.error) { const m = d.error.message || d.error.code || ''; return reject(llmErr(`${host} 返回错误：${m}`, /model|UnsupportedModel/i.test(JSON.stringify(d.error)) ? 'model' : 'http', `HTTP ${r.status}`)); }
+                    if (r.status !== 200) return reject(llmErr(`API ${r.status}: ${body.slice(0, 200)}`, r.status === 404 ? 'model' : 'http'));
+                    const c = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
+                    if (!c) return reject(llmErr('返回内容为空（max_tokens 不足或思考耗尽）', 'empty'));
                     resolve(c);
-                },
-                onerror: r => reject(new Error(`连不上 ${host}（浏览器无法访问该 API，或脚本猫未授权跨域；status=${r && r.status}）`)),
-                ontimeout: () => reject(new Error(`请求 ${host} 超时(120s)——多半是浏览器无法访问外网 API`)),
+                }),
+                onerror: r => fin(() => reject(llmErr(`连不上 ${host}（浏览器无法访问该 API，或脚本猫未授权跨域；status=${r && r.status}）`, 'connect'))),
+                ontimeout: () => fin(() => reject(llmErr(`请求 ${host} 超时——多半是网络不通或模型长时间无完整响应`, 'timeout'))),
             });
         });
     }
@@ -473,8 +621,21 @@
         const score = (txt.match(/得分\s*([\d.]+)/) || [])[1] || null;
         return { passed, total, score };
     }
-    // 失败时读「动态测试」详情：期望输出 vs 你的输出，反馈给模型
-    function fetchFailDetail(assignID, problemID) {
+    // dynamictest 的「期望vs实际」需先经 judgeDetailsCheck 触发服务端按需生成，否则直接 POST 返回空
+    // ——本仓血泪坑：不触发→拿不到差异→ feedbackFromHtml 只能回"未取到具体差异"→纠错退化成盲目重试，模型永远修不对
+    async function ensureDetailReady(assignID, problemID) {
+        const restOf = t => { const m = (t || '').match(/<rest>\s*(-?\d+)\s*<\/rest>/i); return m ? +m[1] : NaN; };
+        // rest = 剩余百分比：>0 仍在生成（轮询），0 完成，<0(-1/-2) 无详情/未提交
+        let rest = restOf(await gmGetText(`${OJ}/assignment/judgeDetailsCheck.jsp?checkFirst=true&assignID=${assignID}&problemID=${problemID}`));
+        for (let i = 0; i < 15 && rest > 0; i++) {
+            await sleep(1000);
+            rest = restOf(await gmGetText(`${OJ}/assignment/judgeDetailsCheck.jsp?assignID=${assignID}&problemID=${problemID}`));
+        }
+        await sleep(300); // 完成后稍等，确保 dynamictest 数据落地
+    }
+    // 失败时读「动态测试」详情：期望输出 vs 你的输出，反馈给模型（先触发生成再取）
+    async function fetchFailDetail(assignID, problemID) {
+        try { await ensureDetailReady(assignID, problemID); } catch (_) {}
         return new Promise(resolve => {
             GM_xmlhttpRequest({
                 method: 'POST', url: `${OJ}/assignment/moretest/dynamictest.jsp`, data: `assignID=${assignID}&problemID=${problemID}&userID=`,
@@ -529,7 +690,7 @@
     /* ============================ 解一题（多版本 + 失败读样例） ============================ */
     const PROBLEM_BUDGET_MS = 180000; // 单题总时长上限，超时自动跳过
     const SAMPLE_DIRECTIVE = '\n\n特别提示：本题描述可能有歧义、或评测就按这些样例来。如果你仍无法从题意推导出通用正确解法，请【面向样例编程】——针对上面各失败测试点的「期望输出」，用条件判断/查表等方式让程序对这些情形给出正确结果（仍必须能正常编译运行，并尽量兼顾未列出的情形）。只输出完整代码/JSON，不要解释。';
-    // 版本计划：v1 直接解；v2 同对话同模型按样例纠错；v3 同对话同模型「面向样例编程」；仅当版本数≥4 时最后一版才升级更高模型
+    // 版本计划：v1 直接解；v2 同对话同模型按样例纠错；v3「面向样例编程」；主模型连错≥3次后追加一版「升级强模型」(干净上下文+重置单题预算)
     function planFor(s) {
         const N = Math.max(1, +s.maxAttempts || 1), strong = s.strongModel || s.model;
         const plan = [];
@@ -537,25 +698,47 @@
             let mode = 'fix', model = s.model, thinking = s.thinking, temperature = 0.4;
             if (i === 0) { mode = 'normal'; temperature = 0; }
             else if (i === 2) { mode = 'sample'; } // 第3次：同对话、不换模型、面向样例
-            else if (i === N - 1 && N >= 4 && strong !== s.model) { mode = 'escalate'; model = strong; thinking = true; temperature = 0; }
-            plan.push({ model, thinking, temperature, mode, escalate: mode === 'escalate' });
+            plan.push({ model, thinking, temperature, mode, escalate: false });
         }
+        // 主模型连错 N(≥3) 次后，追加一版升级强模型（不占主版本槽）：进入前重置单题时间预算 + 压成干净上下文
+        if (N >= 3 && strong !== s.model)
+            plan.push({ model: strong, thinking: true, temperature: 0, mode: 'escalate', escalate: true, resetBudget: true, compactBefore: true });
         return plan;
     }
-    // 多版本：同一对话累积「代码→错误样例→纠正代码→…」，同模型纠错，最后一版才升级更高模型
+    // 同题内上下文压缩：丢弃中间累积，只留 [system, 题目, 最近一版输出, 最近一次反馈]。纯函数，可离线单测。
+    function compactMessages(messages, problem) {
+        const base = buildMessages(problem); // [system, user(题目)]，权威重建，不复用可能被污染的旧 system
+        let lastAssistant = null, lastUserAfter = null;
+        for (let j = messages.length - 1; j >= 2; j--) { // j>=2 跳过 base 的 system/题目
+            const m = messages[j];
+            if (m.role === 'user' && !lastAssistant && !lastUserAfter) lastUserAfter = m;
+            else if (m.role === 'assistant' && !lastAssistant) { lastAssistant = m; break; }
+        }
+        const out = base.slice(); // [system, 题目]
+        if (lastAssistant) out.push(lastAssistant); // 最近一版输出（即便无效也带上，反馈里已说明问题）
+        if (lastUserAfter) out.push(lastUserAfter); // 最近一次反馈（verdict 报错 / feedbackFromHtml / 「上次输出有问题…」）
+        return out;
+    }
+    // 多版本：同对话累积「代码→错误样例→纠正代码→…」；每连错2次压缩上下文；连错≥3次后追加版换强模型(重置预算+干净上下文)
     async function solveProblem(kind, problem, ids, s, onAttempt) {
         const apiKey = getKey(), plan = planFor(s);
-        const messages = buildMessages(problem); // [system, user(题目)]，后续把每版回复与错误样例追加进同一对话
-        const t0 = Date.now(), deadline = t0 + PROBLEM_BUDGET_MS;
-        let best = null, baselineTime = '', timedOut = false;
+        let messages = buildMessages(problem); // [system, user(题目)]，后续把每版回复与错误样例追加进同一对话（每连错2次压缩一次）
+        const t0 = Date.now();
+        let deadline = t0 + PROBLEM_BUDGET_MS; // 升级强模型那版会重置为全新预算
+        let best = null, baselineTime = '', timedOut = false, failStreak = 0;
         try { baselineTime = submitTimeOf((parseVerdict(await fetchVerdict(ids.assignID, ids.problemID)) || {}).content); } catch (_) {}
         for (let i = 0; i < plan.length; i++) {
-            if (deadline - Date.now() < 15000) { timedOut = true; break; } // 单题不足 15s 不再起新一版
             const opt = plan[i];
+            if (opt.resetBudget) deadline = Date.now() + PROBLEM_BUDGET_MS; // 升级强模型：重置单题时间预算（须先于下面的超时判定，否则被原余量误杀）
+            if (deadline - Date.now() < 15000) { timedOut = true; break; } // 单题不足 15s 不再起新一版
+            if (opt.compactBefore) messages = compactMessages(messages, problem); // 升级前压成干净上下文：题目+最近错代码+最近报错
             onAttempt && onAttempt(i + 1, plan.length, opt);
             let res;
             try {
-                const raw = await callLLM(messages, opt, apiKey, deadline - Date.now() - 8000);
+                LOG.push('info', `调用 ${opt.model}${opt.thinking ? '·思考' : ''}（第 ${i + 1}/${plan.length} 版·${MODE_CN[opt.mode] || opt.mode}）`);
+                const raw = await callLLM(messages, opt, apiKey, deadline - Date.now() - 8000, streamHooks());
+                clearTransientBanners();              // 拿到响应=连通且鉴权 OK，清掉连接/超时/卡住类提醒
+                LOG.push('gen', `模型已出答案（${raw.length} 字）`);
                 messages.push({ role: 'assistant', content: raw }); // 模型本版回复留在上下文里
                 let display;
                 if (kind === 'gap') {
@@ -568,22 +751,30 @@
                     const mainClass = (kind === 'iface' && problem.mainClass) ? problem.mainClass : detectMainClass(code);
                     display = code; await submitFile(ids, code, mainClass);
                 }
+                LOG.push('info', '已提交，等待判题…');
                 showNativeProgress(ids); // 恢复页面原生判题动画
                 const v = await pollVerdict(ids.assignID, ids.problemID, baselineTime, deadline);
                 baselineTime = submitTimeOf(v && v.content) || baselineTime;
                 const sc = scoreOf(v && v.content || '');
                 res = { ok: sc.total > 0 && sc.passed === sc.total, ...sc, display, verdict: v, attempt: i + 1 };
+                LOG.push(res.ok ? 'ok' : 'warn', `判题：${res.ok ? '满分' : (sc.passed > 0 ? '部分通过' : '未通过')} ${sc.passed}/${sc.total}${sc.score ? ' · 得分 ' + sc.score : ''}`);
+                if (!res.ok) failStreak++;
                 if (!res.ok && i < plan.length - 1 && deadline - Date.now() > 15000) { // 失败反馈追加到同一对话
                     const ve = verdictError(v && v.content); // 编译/运行错误直接来自 verdict
                     let fb = ve ? `上次提交【${ve.type === 'compile' ? '编译错误' : '运行/超时错误'}】：\n${ve.text}\n请据此修正后重新输出完整、可编译运行的答案。`
                         : (feedbackFromHtml(await fetchFailDetail(ids.assignID, ids.problemID)) || '上次提交未通过，请仔细修正后重新输出完整答案。');
                     if (plan[i + 1] && plan[i + 1].mode === 'sample') fb += SAMPLE_DIRECTIVE; // 下一版起面向样例
                     messages.push({ role: 'user', content: fb });
+                    if (failStreak % 2 === 0) messages = compactMessages(messages, problem); // 每连错2次压缩：只留题目+最近错代码+最近报错
                 }
             } catch (e) {
                 res = { ok: false, error: e.message, passed: 0, total: 0, score: null, attempt: i + 1 };
-                if (i < plan.length - 1 && messages[messages.length - 1].role === 'assistant')
+                LOG.push('err', `第 ${i + 1} 版失败：${e.message}`, e.extra); applyBanner(e);
+                failStreak++;
+                if (i < plan.length - 1 && messages[messages.length - 1].role === 'assistant') {
                     messages.push({ role: 'user', content: '上次输出有问题（' + e.message + '），请修正后重新给出完整答案。' });
+                    if (failStreak % 2 === 0) messages = compactMessages(messages, problem);
+                }
             }
             if (!best || (res.passed || 0) > (best.passed || 0)) best = res;
             if (res.ok) { best = res; break; }
@@ -595,13 +786,35 @@
 
     /* ============================ UI ============================ */
     let panel, fab, statusEl, titleEl, codeWrap, verdictEl, grindEl, btnSolve, btnGrind, busy = false, _tick = null;
+    let bellEl, bellDot, logListEl, bannerWrap, _streamInfo = '';
 
-    function setStatus(text, kind, spin) { if (_tick) { clearInterval(_tick); _tick = null; } statusEl.onclick = null; statusEl.style.cursor = ''; statusEl.className = kind || ''; statusEl.innerHTML = (spin ? '<span class="cgai-spin"></span>' : '') + text; }
+    function setStatus(text, kind, spin) { if (_tick) { clearInterval(_tick); _tick = null; } _streamInfo = ''; statusEl.onclick = null; statusEl.style.cursor = ''; statusEl.className = kind || ''; statusEl.innerHTML = (spin ? '<span class="cgai-spin"></span>' : '') + text; }
     function tickStatus(prefix, kind) {
         if (_tick) clearInterval(_tick);
+        _streamInfo = '';
         const t0 = Date.now();
-        const render = () => { statusEl.className = kind || 'busy'; statusEl.innerHTML = '<span class="cgai-spin"></span>' + prefix + `（已用时 ${Math.round((Date.now() - t0) / 1000)}s）`; };
+        const render = () => { statusEl.className = kind || 'busy'; statusEl.innerHTML = '<span class="cgai-spin"></span>' + prefix + (_streamInfo ? ' · ' + _streamInfo : '') + `（已用时 ${Math.round((Date.now() - t0) / 1000)}s）`; };
         render(); _tick = setInterval(render, 1000);
+    }
+    // 流式 hooks：把「思考中 N字 / 生成中 M字 / ⚠卡住」实时写进状态行；卡住时记一次日志+引导 banner（每段卡顿只记一次）
+    function streamHooks() {
+        let stalled = false;
+        return {
+            onProgress: ({ phase, reasoningLen, contentLen }) => { stalled = false; _streamInfo = phase === 'gen' ? `生成中 ${fmtN(contentLen)}字` : `思考中 ${fmtN(reasoningLen)}字`; },
+            onStall: (secs, hadData) => {
+                _streamInfo = hadData ? `⚠ ${secs}s 无数据，可能卡住` : `⏳ 等待响应 ${secs}s`;
+                if (!stalled) { stalled = true; if (hadData) { LOG.push('warn', `数据流中断 ${secs}s（可能卡住）`); setBanner('stall'); } else LOG.push('warn', `等待首个响应已 ${secs}s`); }
+            },
+        };
+    }
+    // 错误 .kind → 新手引导式 banner
+    function applyBanner(e) {
+        const k = e && e.kind;
+        if (k === 'auth') setBanner('auth');
+        else if (k === 'connect') setBanner('connect');
+        else if (k === 'model') setBanner('model', e.message);
+        else if (k === 'timeout') setBanner('timeout');
+        else if (k === 'empty') setBanner('empty');
     }
     function showVerdictCard(html) { verdictEl.innerHTML = html ? '<div class="cgai-vcard">' + html + '</div>' : ''; }
     function verdictBadge(r) {
@@ -612,6 +825,7 @@
         return ICON.err + (r.error ? '失败：' + r.error : '未通过');
     }
     const KIND_CN = { file: '编程题', iface: '接口题', gap: '填空题' };
+    const MODE_CN = { normal: '直接解', fix: '纠错', sample: '面向样例', escalate: '升级强模型' };
 
     async function runSolveCurrent() {
         if (busy) return; busy = true;
@@ -625,13 +839,16 @@
             setStatus('正在提取题目…', 'busy', true);
             const problem = extractFor(kind), ids = extractIds(kind);
             titleEl.innerHTML = ICON.file + `<span>[${KIND_CN[kind]}] ` + esc(problem.title) + '</span>';
+            LOG.push('info', `解本题 [${KIND_CN[kind]}] ${problem.title}`);
             if (!ids.problemID || !ids.assignID) { setStatus('未能解析 problemID/assignID。', 'err'); return; }
             if (kind === 'gap' && !problem.gaps) { setStatus('未识别到填空空位。', 'err'); return; }
             if (kind !== 'gap' && (!problem.statement || problem.statement.length < 5)) { setStatus('未能提取题面。', 'err'); return; }
 
             if (!s.autoSubmit && kind !== 'gap') {
                 tickStatus(`正在调用 ${s.model} 生成代码…`);
-                const code = parseJavaCode(await callLLM(buildMessages(problem), { model: s.model, thinking: s.thinking, temperature: 0 }, apiKey));
+                LOG.push('info', `调用 ${s.model}（仅生成，不自动提交）`);
+                const code = parseJavaCode(await callLLM(buildMessages(problem), { model: s.model, thinking: s.thinking, temperature: 0 }, apiKey, undefined, streamHooks()));
+                clearTransientBanners();
                 const mc = (kind === 'iface' && problem.mainClass) ? problem.mainClass : detectMainClass(code); fillOnly(code, mc);
                 codeWrap.querySelector('.cgai-code').textContent = code;
                 codeWrap.querySelector('summary').textContent = `生成代码 · 主类 ${mc}`; codeWrap.style.display = 'block';
@@ -641,7 +858,7 @@
             if (r.display) { codeWrap.querySelector('.cgai-code').textContent = r.display; codeWrap.querySelector('summary').textContent = `生成答案 · 第 ${r.attempt} 版`; codeWrap.style.display = 'block'; }
             setStatus(verdictBadge(r), r.ok ? 'ok' : ((r.passed || 0) > 0 ? 'busy' : 'err'));
             showVerdictCard(r.verdict && r.verdict.content);
-        } catch (e) { setStatus('出错：' + (e.message || e), 'err'); }
+        } catch (e) { setStatus('出错：' + (e.message || e), 'err'); LOG.push('err', '解题出错：' + (e.message || e), e && e.extra); applyBanner(e); }
         finally { busy = false; btnSolve.disabled = !isProblemPage(); btnGrind.disabled = false; }
     }
     // problemID/assignID（各题型一致：iframe src 或页面内联）
@@ -664,8 +881,9 @@
     async function startGrind() {
         if (!ensureConfig()) return;
         tickStatus('正在读取作业列表并校验题目链接…');
-        let queue; try { queue = await buildQueue(); } catch (e) { setStatus('读取作业列表失败：' + e.message, 'err'); return; }
-        if (!queue || !queue.length) { setStatus('未发现任何题目链接（请确认已登录且已进入该课程）。', 'err'); return; }
+        let queue; try { queue = await buildQueue(); } catch (e) { setStatus('读取作业列表失败：' + e.message, 'err'); LOG.push('err', '读取作业列表失败：' + e.message); return; }
+        if (!queue || !queue.length) { setStatus('未发现任何题目链接（请确认已登录且已进入该课程）。', 'err'); LOG.push('warn', '未发现任何题目链接（是否已登录/进入课程？）'); return; }
+        LOG.push('info', `开刷启动：共 ${queue.length} 题`);
         setGrind({ active: true, queue, done: {}, navs: 0, startedAt: Date.now(), settings: settings() });
         renderGrind(); refreshButtons();
         navTo(queue[0]);
@@ -721,7 +939,7 @@
                 tip();
                 const timer = setInterval(() => { const gg = getGrind(); if (!gg || !gg.active) { clearInterval(timer); return; } if (--left <= 0) { clearInterval(timer); navTo(next); } else tip(); }, 1000);
             } else finishGrind(g);
-        } catch (e) { setStatus('开刷出错：' + (e.message || e), 'err'); }
+        } catch (e) { setStatus('开刷出错：' + (e.message || e), 'err'); LOG.push('err', '开刷出错：' + (e.message || e), e && e.extra); applyBanner(e); }
         finally { busy = false; refreshButtons(); }
     }
     function refreshButtons() {
@@ -770,12 +988,59 @@
     function showOnboarding() {
         const a = panel.querySelector('#cgai-arrow'), g = panel.querySelector('#cgai-cfg');
         if (a) a.classList.add('show'); if (g) g.classList.add('cgai-attn');
+        setBanner('noKey');
         setStatus('还没配置 API Key —— 点右上角齿轮（或上方蓝色箭头）开始，支持 GPT / DeepSeek。', 'busy');
         statusEl.style.cursor = 'pointer'; statusEl.onclick = openConfig;
     }
     function clearOnboarding() {
         const a = panel.querySelector('#cgai-arrow'), g = panel.querySelector('#cgai-cfg');
         if (a) a.classList.remove('show'); if (g) g.classList.remove('cgai-attn');
+        clearBanner('noKey');
+    }
+    /* ---- 日志 / 诊断浮层 ---- */
+    function bannerHtml(kind, info) {
+        const d = BANNER_DEFS[kind]; if (!d) return '';
+        const cls = d.lvl === 'err' ? 'err' : 'warn', ic = d.lvl === 'err' ? ICON.err : ICON.warn;
+        return `<div class="cgai-banner ${cls}"><span class="bi">${ic}</span><div class="bc"><b>${esc(d.title)}</b><div>${esc(d.body)}</div>` +
+            `${info && info.extra ? `<div class="bx">${esc(info.extra)}</div>` : ''}<button class="cgai-mini bgo" data-go="${d.go}">${esc(d.act)} →</button></div></div>`;
+    }
+    function renderLog() {
+        if (!logListEl) return;
+        if (bannerWrap) {
+            bannerWrap.innerHTML = Object.keys(activeBanners).map(k => bannerHtml(k, activeBanners[k])).join('');
+            bannerWrap.querySelectorAll('.bgo').forEach(b => b.onclick = () => { if (b.getAttribute('data-go') === 'config') { closeLog(); openConfig(); } });
+        }
+        logListEl.innerHTML = LOG.buf.map(e =>
+            `<div class="cgai-logrow ${e.level}"><span class="lt">${hhmmss(e.t)}</span><span class="li">${LEVELS[e.level] || '·'}</span>` +
+            `<span class="lm">${esc(e.msg)}${e.detail ? `<span class="ld">${esc(e.detail)}</span>` : ''}</span></div>`
+        ).join('') || '<div class="cgai-empty">暂无日志。开始解题后这里会逐步记录「调用模型 / 思考 / 生成 / 提交 / 判题」，卡住或报错也会在此说明，方便定位排查。</div>';
+        if (panel && panel.querySelector('#cgai-log').classList.contains('open')) logListEl.scrollTop = logListEl.scrollHeight;
+    }
+    function openLog() {
+        const a = panel.querySelector('#cgai-arrow'); if (a) a.classList.remove('show');
+        unseen = 0; updateBell(); if (bellEl) bellEl.classList.remove('cgai-attn');
+        renderLog();
+        panel.querySelector('#cgai-log').classList.add('open');
+        logListEl.scrollTop = logListEl.scrollHeight;
+    }
+    function closeLog() { panel.querySelector('#cgai-log').classList.remove('open'); }
+    // 一键复制诊断（隐藏 API Key）：服务商 host / 模型 / UA / 最近事件 —— 直接贴进 issue 即可定位
+    function copyDiagnostics() {
+        const s = settings(), host = getBaseURL().replace(/^https?:\/\//, '');
+        const head = [
+            `飞跃·解题 Solver v${VERSION} 诊断日志`,
+            `时间: ${new Date().toLocaleString()}`,
+            `页面: ${location.pathname}${location.search}`,
+            `服务商(host): ${host}    （API Key 已隐藏，不会被复制）`,
+            `主模型: ${s.model}  强模型: ${s.strongModel || '-'}  思考: ${s.thinking ? '开' : '关'}`,
+            `重试次数: ${s.maxAttempts}  自动提交: ${s.autoSubmit ? '开' : '关'}  跳过已满分: ${s.skipPassed ? '开' : '关'}`,
+            `UA: ${navigator.userAgent}`,
+            '--- 最近事件（旧 → 新）---',
+        ];
+        const rows = LOG.buf.map(e => `[${hhmmss(e.t)}] ${LEVELS[e.level] || ''} ${e.msg}${e.detail ? '\n      ' + String(e.detail).replace(/\n/g, '\n      ') : ''}`);
+        const text = head.concat(rows).join('\n');
+        try { GM_setClipboard(text); } catch (_) { try { navigator.clipboard.writeText(text); } catch (__) {} }
+        const sp = panel.querySelector('#log-copy span'); if (sp) { const o = sp.textContent; sp.textContent = '已复制 ✓'; setTimeout(() => { sp.textContent = o; }, 1500); }
     }
     function openConfig() {
         const a = panel.querySelector('#cgai-arrow'); if (a) a.classList.remove('show'); // 配置打开时藏箭头（避免盖在浮层上）
@@ -805,7 +1070,8 @@
             <div id="cgai-head">
                 <div class="cgai-brand"><span class="cgai-badge">${ICON.brand}</span>
                     <span class="cgai-titles"><b>飞跃·解题 Solver</b><i>DeepSeek 自动解题 · 开刷</i></span></div>
-                <span class="cgai-tools"><span class="cgai-ic" id="cgai-cfg" title="配置">${ICON.settings}</span>
+                <span class="cgai-tools"><span class="cgai-ic" id="cgai-bell" title="日志 / 诊断（卡了？报错？看这里）">${ICON.bell}<span class="cgai-dot" id="cgai-belldot">0</span></span>
+                    <span class="cgai-ic" id="cgai-cfg" title="配置">${ICON.settings}</span>
                     <span class="cgai-ic" id="cgai-min" title="收起">${ICON.minus}</span></span>
             </div>
             <div id="cgai-body">
@@ -814,7 +1080,7 @@
                     <label class="cgai-chk"><input type="checkbox" id="cgai-think"> 思考模式</label>
                     <label class="cgai-chk"><input type="checkbox" id="cgai-auto"> 自动提交</label>
                     <label class="cgai-chk"><input type="checkbox" id="cgai-skip"> 跳过已满分</label>
-                    <label class="f">重试版本 <input type="number" id="cgai-att" min="1" max="5"></label>
+                    <label class="f">重试次数 <input type="number" id="cgai-att" min="1" max="5"></label>
                 </div>
                 <div class="cgai-btns">
                     <button class="cgai-btn cgai-btn-primary" id="cgai-solve">${ICON.run}<span>解本题</span></button>
@@ -836,9 +1102,16 @@
                         <select id="cfg-model"></select><input id="cfg-model-c" type="text" spellcheck="false" placeholder="自定义模型名" style="display:none">
                         <span class="hint" id="cfg-msg"></span></div>
                     <div class="cgai-field"><label>重试强模型（可选，失败时升级用）</label>
-                        <select id="cfg-strong"></select><input id="cfg-strong-c" type="text" spellcheck="false" placeholder="自定义模型名（留空=不升级）" style="display:none"></div>
+                        <select id="cfg-strong"></select><input id="cfg-strong-c" type="text" spellcheck="false" placeholder="自定义模型名（留空=不升级）" style="display:none">
+                        <span class="hint">主模型连错 3 次以上才会调用（需"重试次数"≥3）。换强模型那版会重置单题时间预算，给思考型模型充足时间。</span></div>
                 </div>
                 <div class="cgai-btns"><button class="cgai-btn cgai-btn-primary" id="cfg-save">保存</button><button class="cgai-btn cgai-btn-ghost" id="cfg-cancel">取消</button></div>
+            </div>
+            <div id="cgai-log">
+                <div class="cfg-head"><div><b>日志 / 诊断</b> <span class="sub">记录每一步 · 卡住/报错有说明 · 可一键复制诊断日志</span></div><span class="cgai-ic" id="log-x" title="关闭">${ICON.minus}</span></div>
+                <div id="cgai-banners"></div>
+                <div id="cgai-loglist"></div>
+                <div class="cgai-btns" style="margin-top:11px"><button class="cgai-btn cgai-btn-primary" id="log-copy">${ICON.copy}<span>复制诊断日志</span></button><button class="cgai-btn cgai-btn-ghost" id="log-clear" title="清空日志" style="flex:0 0 auto">${ICON.trash}</button></div>
             </div>`;
         const arrow = document.createElement('div'); arrow.id = 'cgai-arrow';
         arrow.innerHTML = ICON.arrowUp + '<span>首次使用：点这里或右上角齿轮，配置 API Key</span>';
@@ -850,6 +1123,8 @@
         statusEl = panel.querySelector('#cgai-status'); titleEl = panel.querySelector('#cgai-title');
         codeWrap = panel.querySelector('#cgai-codewrap'); verdictEl = panel.querySelector('#cgai-verdict');
         grindEl = panel.querySelector('#cgai-grind'); btnSolve = panel.querySelector('#cgai-solve'); btnGrind = panel.querySelector('#cgai-grindbtn');
+        bellEl = panel.querySelector('#cgai-bell'); bellDot = panel.querySelector('#cgai-belldot');
+        logListEl = panel.querySelector('#cgai-loglist'); bannerWrap = panel.querySelector('#cgai-banners');
 
         const s = settings();
         const think = panel.querySelector('#cgai-think'); think.checked = s.thinking;
@@ -872,8 +1147,13 @@
         panel.querySelector('#cfg-strong').onchange = e => syncCustom(e.target, panel.querySelector('#cfg-strong-c'));
         panel.querySelector('#cgai-min').onclick = () => { panel.style.display = 'none'; fab.style.display = 'flex'; };
         fab.onclick = () => { panel.style.display = 'flex'; fab.style.display = 'none'; };
+        panel.querySelector('#cgai-bell').onclick = openLog;
+        panel.querySelector('#log-x').onclick = closeLog;
+        panel.querySelector('#log-copy').onclick = copyDiagnostics;
+        panel.querySelector('#log-clear').onclick = () => { LOG.clear(); };
         makeDraggable(panel, panel.querySelector('#cgai-head'));
 
+        updateBell(); renderLog();
         refreshButtons(); renderGrind();
         if (!getKey()) showOnboarding();
         else { const k = pageType(); setStatus(k ? `当前：${KIND_CN[k]}。点"解本题"或"一键开刷全部"。` : '任意页可"一键开刷全部"（会先读取作业列表）。', ''); }
@@ -886,13 +1166,15 @@
     }
 
     GM_registerMenuCommand('配置 (Base URL / API Key / 模型)', () => { if (panel) openConfig(); });
+    GM_registerMenuCommand('日志 / 诊断（卡住/报错看这里）', () => { if (panel) { if (panel.style.display === 'none') { panel.style.display = 'flex'; if (fab) fab.style.display = 'none'; } openLog(); } });
     GM_registerMenuCommand('停止开刷 / 清除进度', () => { clearGrind(); if (grindEl) renderGrind(); if (statusEl) setStatus('已清除开刷进度。', ''); if (btnGrind) refreshButtons(); });
 
     if (typeof window !== 'undefined' && window.__CGAI_EXPOSE__) {
-        window.__CGAI_API__ = { htmlToText, titleOf, extractStatement, extractGap, extractFor, extractIds, getCur, pageType, discoverAssignList, discoverCourseID, parseAssignProblems, fetchAssignProblems, buildQueue, itemKey, parseJavaCode, detectMainClass, parseGapAnswers, parseVerdict, submitTimeOf, scoreOf, verdictError, feedbackFromHtml, buildMessages, planFor };
+        window.__CGAI_API__ = { htmlToText, titleOf, extractStatement, extractGap, extractFor, extractIds, getCur, pageType, discoverAssignList, discoverCourseID, parseAssignProblems, fetchAssignProblems, buildQueue, itemKey, parseJavaCode, detectMainClass, parseGapAnswers, parseVerdict, submitTimeOf, scoreOf, verdictError, feedbackFromHtml, buildMessages, compactMessages, planFor, parseSSE };
     }
 
     function boot() {
+        LOG.load();
         buildPanel();
         const g = getGrind();
         if (g && g.active && isProblemPage()) setTimeout(grindStep, 1300);

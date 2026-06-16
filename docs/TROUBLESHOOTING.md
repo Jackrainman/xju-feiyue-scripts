@@ -82,8 +82,24 @@
 - **根因**：v4 是推理模型，`max_tokens` 给不足会导致空。
 - **解法**：`max_tokens=8192`；判题新鲜度用「最后一次提交时间」判断（修复重复提交内容相同时卡死）。
 
+### ★ 换 API（mimo / 火山）后「经常没响应」/ 面板像卡死
+- **现象**：同一个 Key 在 Hermes 里好用，在 Solver 里点「解本题」后转圈很久、看着像没响应；mimo（`token-plan-cn.xiaomimimo.com/v1`）、火山编程计划（`ark.cn-beijing.volces.com/api/coding/v3`）尤甚。
+- **根因（rainman 实测）**：旧版 `callLLM` 用 `stream:false`，整段缓冲——**推理模型先思考再出正文**：kimi-k2 实测**首个正文字符要等到第 15s**（前 14s 全在思考、连接零字节流入），mimo 也要 2~3s 才出正文。期间空闲连接易被中间层掐断，且 UI 只有一个不变的转圈 → 用户根本分不清「在思考 / 在生成 / 真卡死」。不是 API 不兼容，是**没有可见进度 + 长空闲**。
+- **解法（v2.3.0）**：`callLLM` 改 **`stream:true` + 增量 SSE 解析**（`parseSSE` 纯函数可单测；`onprogress` 边收边解，`onload` 兜底；服务商若忽略 stream 则按普通 JSON 回退）。状态行实时显示 **「思考中 N字 / 生成中 M字」**，>20s 无新数据才提示 **「⚠ 可能卡住」**。实测：mimo/火山 kimi-k2 思考→生成全程可见，最大数据间隔 ~0.4s，连接不再空闲。
+- **诊断**：右上角**铃铛**打开「日志/诊断」——每步（调用/思考/生成/提交/判题/报错）带时间戳；**复制诊断日志**（自动隐藏 API Key）可直接贴进 issue。`window.__CGAI_API__.parseSSE` 可单测。
+
+### 火山「编程计划」endpoint 报 `UnsupportedModel`（HTTP 404）
+- **现象**：`ark.cn-beijing.volces.com/api/coding/v3` 选某些模型直接 404 `does not support the coding plan feature`。
+- **根因**：该 endpoint 只对**部分模型**开放（与 `/models` 列表不一致——列表是全量）。实测可用：**`kimi-k2-250711`、`deepseek-v3-250324`**；不可用（404）：`deepseek-v3-1-250821`、`deepseek-r1-250528`、`doubao-seed-1-6*`。mimo 用 `mimo-v2.5-pro` 正常。
+- **解法（v2.3.0）**：脚本把这类错误归类为 `model`，弹「该模型不被接口支持」引导 banner，提示换兼容模型——不再表现为「无响应」。Base URL 直接填到 `/coding/v3`（脚本会拼 `/chat/completions`）。
+
 ### 接口题 duplicate class / 跨域请求挂起
 - **解法**：接口题**不重定义评测已提供的接口**；脚本猫首次会提示「允许跨域连接」到 API 域名，**必须点允许**否则请求一直挂起。
+
+### ★ 失败反馈为空 → 纠错变盲目重试（隐藏测试数据的题永远修不对）
+- **现象**：某些题（如「换码序列的拷贝」）连续多版全 `输出错误`，连 reasoner 也救不回；状态里看不到「期望 vs 实际」差异。
+- **根因（实测）**：`fetchFailDetail` 直接 POST `moretest/dynamictest.jsp` 取差异，但该详情是**按需生成**的——必须先经页面「详细评判结果 »」背后的流程触发：GET `judgeDetailsCheck.jsp?checkFirst=true` → 轮询 `judgeDetailsCheck.jsp` 直到 `<rest>0</rest>`（rest=剩余%，**0=完成**），`dynamictest.jsp` 才会带 `wrongContent/rightContent`。不触发 → 返回空 → `feedbackFromHtml` 只能回「未取到具体差异」→ 模型每版都不知错在哪 → 盲目重试，纠错环形同虚设。
+- **解法（v2.2.5）**：`fetchFailDetail` 先 `ensureDetailReady`（`checkFirst=true` + 轮询 rest 到 0）再 POST `dynamictest.jsp`。实测（注入故意错答案）：修复前 5/5 全错且全程「未取到具体差异」；修复后 **第 2 版即满分**（拿到「你的输出结尾多了 \n」差异后自纠）。
 
 > 更多见 [scripts/feiyue-solver/README.md](../scripts/feiyue-solver/README.md) 的「工作原理」。
 

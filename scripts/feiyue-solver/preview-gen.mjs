@@ -40,7 +40,7 @@ function page(bodyExtra, configOpen) {
         <label class="cgai-chk"><input type="checkbox"> 思考模式</label>
         <label class="cgai-chk"><input type="checkbox" checked> 自动提交</label>
         <label class="cgai-chk"><input type="checkbox" checked> 跳过已满分</label>
-        <label class="f">重试版本 <input type="number" value="3" min="1" max="5"></label>
+        <label class="f">重试次数 <input type="number" value="3" min="1" max="5"></label>
       </div>
       <div class="cgai-btns">
         <button class="cgai-btn cgai-btn-primary">${I.run}<span>解本题</span></button>

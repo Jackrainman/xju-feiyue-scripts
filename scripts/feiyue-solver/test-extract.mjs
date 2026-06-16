@@ -96,17 +96,50 @@ console.log('\n[模型梯队 / 判分]');
 {
     const { api } = load('pl1.html', 'http://10.109.120.139/x');
     const L = api.planFor({ model: 'deepseek-v4-flash', strongModel: 'deepseek-v4-pro', thinking: false, maxAttempts: 3 });
-    ok('plan=3', L.length === 3);
-    ok('v1 normal / v2 fix 同模型(flash)', L[0].mode === 'normal' && L[1].mode === 'fix' && L[0].model === 'deepseek-v4-flash' && L[1].model === 'deepseek-v4-flash');
-    ok('v3=面向样例·同模型(不升级)', L[2].mode === 'sample' && L[2].model === 'deepseek-v4-flash' && !L[2].escalate);
+    ok('N=3+强模型已配 → 追加 escalate，共4版', L.length === 4);
+    ok('v1 normal / v2 fix 同主模型(flash)', L[0].mode === 'normal' && L[1].mode === 'fix' && L[0].model === 'deepseek-v4-flash' && L[1].model === 'deepseek-v4-flash');
+    ok('v3=面向样例·同主模型·不升级', L[2].mode === 'sample' && L[2].model === 'deepseek-v4-flash' && !L[2].escalate);
+    ok('前3版均主模型·非escalate', L.slice(0, 3).every(p => p.model === 'deepseek-v4-flash' && !p.escalate));
+    ok('v4=升级强模型(pro)+思考+重置预算+压缩', L[3].mode === 'escalate' && L[3].model === 'deepseek-v4-pro' && L[3].thinking === true && L[3].escalate === true && L[3].resetBudget === true && L[3].compactBefore === true);
     const L4 = api.planFor({ model: 'deepseek-v4-flash', strongModel: 'deepseek-v4-pro', thinking: false, maxAttempts: 4 });
-    ok('版本≥4 时 v3 面向样例 / v4 升级强模型', L4[2].mode === 'sample' && L4[3].mode === 'escalate' && L4[3].model === 'deepseek-v4-pro');
-    ok('maxAttempts=1 只 normal 不升级', (() => { const p = api.planFor({ model: 'm', strongModel: 'big', maxAttempts: 1 }); return p.length === 1 && p[0].mode === 'normal' && p[0].model === 'm'; })());
+    ok('N=4 → 共5版，v5才是escalate(pro)、v4仍主模型', L4.length === 5 && L4[4].mode === 'escalate' && L4[4].model === 'deepseek-v4-pro' && !L4[3].escalate);
+    const L5 = api.planFor({ model: 'deepseek-v4-flash', strongModel: 'deepseek-v4-pro', maxAttempts: 5 });
+    ok('N=5 → 共6版，v6=escalate', L5.length === 6 && L5[5].mode === 'escalate');
+    const L2 = api.planFor({ model: 'deepseek-v4-flash', strongModel: 'deepseek-v4-pro', maxAttempts: 2 });
+    ok('N=2(<3) → 不追加escalate，共2版', L2.length === 2 && !L2.some(p => p.escalate));
+    ok('maxAttempts=1 只 normal 不升级', (() => { const p = api.planFor({ model: 'm', strongModel: 'big', maxAttempts: 1 }); return p.length === 1 && p[0].mode === 'normal' && p[0].model === 'm' && !p[0].escalate; })());
+    ok('强模型留空 → N=5 也不追加', (() => { const p = api.planFor({ model: 'm', strongModel: '', maxAttempts: 5 }); return p.length === 5 && !p.some(x => x.escalate); })());
+    ok('强模型==主模型 → 不追加', (() => { const p = api.planFor({ model: 'm', strongModel: 'm', maxAttempts: 5 }); return p.length === 5 && !p.some(x => x.escalate); })());
     ok('submitTimeOf', api.submitTimeOf('得分20.00 最后一次提交时间:2026-06-09 14:05:42 abc') === '2026-06-09 14:05:42');
     ok('verdictError 抓编译错误(verdict里)', (() => { const e = api.verdictError('<font>得分0.00 编译错误. InStudentTest.java:10: error: cannot find symbol class Student implements MoveAble ^ 1 error</font>'); return e && e.type === 'compile' && /cannot find symbol/.test(e.text); })());
     ok('verdictError 正常通过=null', api.verdictError('得分20.00 共有测试数据:5 测试数据1 完全正确') === null);
     let v = null; try { v = api.parseVerdict(new TextDecoder('gbk').decode(fs.readFileSync(`${DIR}/verdict.json`))); } catch (_) {}
     if (v) { const sc = api.scoreOf(v.content); ok('scoreOf 5/5 得分20.00', sc.passed === 5 && sc.total === 5 && sc.score === '20.00'); }
+}
+
+console.log('\n[同题上下文压缩 compactMessages]');
+{
+    const { api } = load('pl1.html', 'http://10.109.120.139/x');
+    const prob = { kind: 'file', title: 'T', statement: '题面描述XYZ' };
+    const base = api.buildMessages(prob); // [system, 题目]
+    const acc = base.concat([
+        { role: 'assistant', content: 'CODE_V1' }, { role: 'user', content: 'FB_1' },
+        { role: 'assistant', content: 'CODE_V2' }, { role: 'user', content: 'FB_2' },
+    ]);
+    const c = api.compactMessages(acc, prob);
+    ok('压成4元', c.length === 4);
+    ok('保留 system + 题目(权威重建)', c[0].role === 'system' && c[1].role === 'user' && /题面描述XYZ/.test(c[1].content));
+    ok('只留最近一版输出 CODE_V2', c[2].role === 'assistant' && c[2].content === 'CODE_V2');
+    ok('只留最近一次反馈 FB_2', c[3].role === 'user' && c[3].content === 'FB_2');
+    ok('丢弃中间 CODE_V1 / FB_1', !c.some(m => /CODE_V1|FB_1/.test(m.content)));
+    const accBad = base.concat([
+        { role: 'assistant', content: 'GOOD' }, { role: 'user', content: 'FB' },
+        { role: 'assistant', content: '不是有效Java' }, { role: 'user', content: '上次输出有问题（生成结果不是有效 Java），请修正后重新给出完整答案。' },
+    ]);
+    const cb = api.compactMessages(accBad, prob);
+    ok('异常分支：保留无效输出 + 「上次输出有问题」提示', cb.length === 4 && /不是有效Java/.test(cb[2].content) && /上次输出有问题/.test(cb[3].content));
+    ok('压缩幂等(对应 escalate compactBefore 双触发)', JSON.stringify(api.compactMessages(c, prob)) === JSON.stringify(c));
+    ok('仅[system,题目]安全返回2元', api.compactMessages(base, prob).length === 2);
 }
 
 console.log(`\n=== ${pass} 通过, ${fail} 失败 ===`);
