@@ -137,9 +137,44 @@ async function t5() {
   ok('60s gen 静默后收口、返回已拿到的正文', out === 'partial code here', err ? { err: err.message } : out);
 }
 
+// ---- T6: 思考耗尽 token 预算（reasoning-only + finish_reason:length，无正文）→ reject(starved) ----
+async function t6() {
+  console.log('T6 思考耗尽 token 预算（reasoning-only + finish_reason:length，无正文）→ reject(starved)');
+  const body = 'data: {"choices":[{"delta":{"reasoning_content":"想了很久"},"finish_reason":null}]}\n\n' +
+    'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n' + 'data: [DONE]\n\n';
+  const gm = opts => { opts.onloadstart({ response: undefined }); setImmediate(() => opts.onload({ status: 200, responseText: body })); };
+  const { api } = makeCtx(gm);
+  let err = null;
+  try { await api.callLLM([{ role: 'user', content: 'x' }], { model: 'm', maxTokens: 8192 }, 'k', 5000, base()); } catch (e) { err = e; }
+  ok('reject 且 kind=starved', err && err.kind === 'starved', err && { msg: err.message, kind: err.kind });
+}
+
+// ---- T7: 思考完自愿收尾、无正文（finish_reason:stop）→ reject(empty)，不应判 starved ----
+async function t7() {
+  console.log('T7 finish_reason:stop 且无正文 → reject(empty)，不应误判 starved');
+  const body = 'data: {"choices":[{"delta":{"reasoning_content":"算了不写"},"finish_reason":null}]}\n\n' +
+    'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n' + 'data: [DONE]\n\n';
+  const gm = opts => { opts.onloadstart({ response: undefined }); setImmediate(() => opts.onload({ status: 200, responseText: body })); };
+  const { api } = makeCtx(gm);
+  let err = null;
+  try { await api.callLLM([{ role: 'user', content: 'x' }], { model: 'm' }, 'k', 5000, base()); } catch (e) { err = e; }
+  ok('reject 且 kind=empty（非 starved）', err && err.kind === 'empty', err && { msg: err.message, kind: err.kind });
+}
+
+// ---- T8: max_tokens 超模型上限（400 错误体）→ reject(capped)，extra=请求的 maxTokens ----
+async function t8() {
+  console.log('T8 max_tokens 超模型上限（400 错误体）→ reject(capped)，extra=请求的 maxTokens');
+  const gm = opts => { opts.onloadstart({ response: undefined }); setImmediate(() => opts.onload({ status: 400, responseText: '{"error":{"message":"max_tokens is too large: 32768. The maximum is 8192","type":"invalid_request_error"}}' })); };
+  const { api } = makeCtx(gm);
+  let err = null;
+  try { await api.callLLM([{ role: 'user', content: 'x' }], { model: 'deepseek-chat', maxTokens: 32768 }, 'k', 5000, base()); } catch (e) { err = e; }
+  ok('reject 且 kind=capped', err && err.kind === 'capped', err && { msg: err.message, kind: err.kind });
+  ok('extra 记下请求的 maxTokens(32768)', err && err.extra === 32768, err && err.extra);
+}
+
 function noopHook() {}
 function base() { return { onProgress: noopHook, onStall: noopHook, onStreamMode: noopHook, onServerError: noopHook }; }
 
-await t1(); await t2(); await t3(); await t4(); await t5();
+await t1(); await t2(); await t3(); await t4(); await t5(); await t6(); await t7(); await t8();
 console.log(`\n=== ${pass} 通过 / ${fail} 失败 ===`);
 process.exit(fail ? 1 : 0);
