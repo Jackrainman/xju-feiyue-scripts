@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         飞跃·解题 Solver
 // @namespace    https://feiyue.selab.top/feiyue-solver
-// @version      2.6.0
-// @description  希冀(CourseGrading/educg) 编程/填空/接口/在线编辑题：提取题目→DeepSeek 生成→自动提交→读判题结果；一键串行开刷所有作业(校验链接+排序)、开刷前自动抽取未抽题作业、失败读样例多版本重试、自动跳题。v2.3：流式响应(实时看到"思考/生成/卡住"，杜绝长生成时的"无响应")、铃铛日志诊断面板(特殊情况新手引导式提醒+一键复制诊断日志)。v2.4：同题上下文压缩(mod-2)+主模型连错3次后升级强模型(重置单题时间预算)。v2.4.4：支持「在线代码编辑器题」(programList_ce.jsp，源码走 cgsoucecode/byCE 提交)，修复此类题"识别不到"。v2.4.5：思考/生成/卡住状态按阶段判定——只有"出正文后静默"才报卡住，"思考中静默"不再误判为响应慢/卡住(思考阈值放宽到35s)。v2.4.6：用 responseType:stream 自读流——修复脚本猫(ScriptCat MV3)下"假流式/整段缓冲"(默认走原生 XHR 只在 onload 一次性回传正文)，让逐字进度真正实时；附启动探针、生成静默60s收口、流内 error 不再吞。v2.5.0：难题正确率修复——①上下文压缩保留"最近两轮"(代码+失败反馈)而非仅一轮，多版纠错不再失忆/反复踩坑 ②「面向样例」改为反推通用规则并警告硬编码必挂隐藏用例，不再鼓励打表过拟合。v2.6.0：自适应 max_tokens(思考模型默认 32768，思考耗尽预算空手而归时自动加大重试、并按模型学习其 token 上限避免 400)+解耦长思考超时(单次调用给足 6 分钟、不再被单题总时钟挤压秒杀，单题总预算抬到 15 分钟仅作版间闸门)，新增配置页可调 max_tokens/单次超时/单题预算三个旋钮(留空=自动)。
+// @version      2.6.1
+// @description  希冀(CourseGrading/educg) 编程/填空/接口/在线编辑题：提取题目→DeepSeek 生成→自动提交→读判题结果；一键串行开刷所有作业(校验链接+排序)、开刷前自动抽取未抽题作业、失败读样例多版本重试、自动跳题。v2.3：流式响应(实时看到"思考/生成/卡住"，杜绝长生成时的"无响应")、铃铛日志诊断面板(特殊情况新手引导式提醒+一键复制诊断日志)。v2.4：同题上下文压缩(mod-2)+主模型连错3次后升级强模型(重置单题时间预算)。v2.4.4：支持「在线代码编辑器题」(programList_ce.jsp，源码走 cgsoucecode/byCE 提交)，修复此类题"识别不到"。v2.4.5：思考/生成/卡住状态按阶段判定——只有"出正文后静默"才报卡住，"思考中静默"不再误判为响应慢/卡住(思考阈值放宽到35s)。v2.4.6：用 responseType:stream 自读流——修复脚本猫(ScriptCat MV3)下"假流式/整段缓冲"(默认走原生 XHR 只在 onload 一次性回传正文)，让逐字进度真正实时；附启动探针、生成静默60s收口、流内 error 不再吞。v2.5.0：难题正确率修复——①上下文压缩保留"最近两轮"(代码+失败反馈)而非仅一轮，多版纠错不再失忆/反复踩坑 ②「面向样例」改为反推通用规则并警告硬编码必挂隐藏用例，不再鼓励打表过拟合。v2.6.0：自适应 max_tokens(思考模型默认 32768，思考耗尽预算空手而归时自动加大重试、并按模型学习其 token 上限避免 400)+解耦长思考超时(单次调用给足 6 分钟、不再被单题总时钟挤压秒杀，单题总预算抬到 15 分钟仅作版间闸门)，新增配置页可调 max_tokens/单次超时/单题预算三个旋钮(留空=自动)。v2.6.1：审查修复——capped 仅匹配真正的 max_tokens 超限(排除输入上下文超限/限流，避免误把它们学成坏的 token 上限缓存)；capped 学习改"被拒值减半、封顶 8192"逐版收敛(不再死写 8192)；已提交后至少轮询 90s 拿判题(防总预算耗尽后 deadline 过期、把已交答案当失败丢弃)。
 // @author       winbeau
 // @homepageURL  https://github.com/XjuSelab/xju-feiyue-scripts
 // @supportURL   https://github.com/XjuSelab/xju-feiyue-scripts/issues
@@ -40,7 +40,7 @@
         SKIP_PASSED: 'cg_skip_passed', GRIND: 'cg_grind_state', MODELS_CACHE: 'ds_models_cache', LOG: 'cgai_log',
         MAX_TOKENS: 'cg_max_tokens', CALL_TIMEOUT: 'cg_call_timeout', PROBLEM_BUDGET: 'cg_problem_budget', TOKENS_CAP: 'cg_tokens_cap',
     };
-    const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '2.6.0';
+    const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '2.6.1';
     const DEFAULTS = { baseURL: 'https://api.deepseek.com', model: 'deepseek-chat', strongModel: 'deepseek-reasoner' };
     const MODEL_SUGGEST = ['deepseek-chat', 'deepseek-reasoner', 'gpt-5.5', 'gpt-5.4-pro'];
     const OJ = location.origin;
@@ -98,7 +98,7 @@
         timeout: { lvl: 'warn', title: '请求超时', body: '模型长时间未给出完整响应。可重试、换更快的模型，或检查网络稳定性。', act: '看日志', go: 'log' },
         stall:   { lvl: 'warn', title: '生成疑似卡住', body: '已在输出正文阶段、却较长时间没有新增内容（不是在思考，而是真的停了）。可停止后重试，或更换模型/检查网络。', act: '看日志', go: 'log' },
         empty:   { lvl: 'warn', title: '返回内容为空', body: '模型只输出了思考没给正文，或 max_tokens 被思考耗尽。可关思考模式或换模型重试。', act: '看日志', go: 'log' },
-        starved: { lvl: 'warn', title: '思考耗尽 token 预算', body: '模型把 max_tokens 几乎全用在思考上、没写完正文。已自动加大预算重试；若仍失败，可在配置页调高 max_tokens 或关思考模式。', act: '看日志', go: 'log' },
+        starved: { lvl: 'warn', title: '思考耗尽 token 预算', body: '模型把 max_tokens 几乎全用在思考上、没写完正文。会自动加大预算重试；若多次仍失败，可在配置页调高 max_tokens 或关思考模式。', act: '看日志', go: 'log' },
         capped:  { lvl: 'warn', title: '模型 token 上限不足', body: '当前模型不支持这么大的 max_tokens，已自动记住其上限并降回重试。如仍异常可在配置页手动设小 max_tokens。', act: '看日志', go: 'log' },
     };
     let activeBanners = {};            // kind -> { extra }
@@ -520,7 +520,10 @@
     }
     const llmErr = (msg, kind, extra) => Object.assign(new Error(msg), { kind: kind || 'http', extra: extra || '' });
     // 服务端「max_tokens 超模型上限」类错误文本特征（deepseek 这类 400 是 kind:'http'，按文本判不按 kind）
-    const CAP_RE = /max[_ ]?tokens|maximum (context|number of tokens)|context length|too many tokens|reduce.*length/i;
+    // 「max_tokens(输出长度)超模型上限」错误特征；NONCAP_RE 排除「输入上下文超限 / 限流」——它们若被误判 capped 会把 token 上限缓存学坏(误降到 8192 后所有思考调用饿死)。
+    const CAP_RE = /max[_ ]?tokens|maximum number of tokens|maximum (completion|output) tokens/i;
+    const NONCAP_RE = /context (length|window|size)|maximum context|input token|rate.?limit|too many requests|reduce the length/i;
+    const isCapErr = es => CAP_RE.test(es) && !NONCAP_RE.test(es);
     // 纯函数（可单测）：按「思考开/关 + 学习到的模型上限 cap」决定本版 max_tokens。
     // 思考模型把预算大量花在 reasoning_content 上，默认给 32768、普通 8192；用户在配置页填了 maxTokens 则优先；cap>0 时钳到学习上限。
     function autoTokens(opt, s, cap) {
@@ -605,22 +608,22 @@
                         if (p.content) { if (p.errObj && hooks && hooks.onServerError) hooks.onServerError(p.errObj); return resolve(p.content); }
                         if (p.errObj) {
                             const es = JSON.stringify(p.errObj);
-                            if (CAP_RE.test(es)) return reject(llmErr(`${host}: max_tokens 超模型上限——${p.errObj.message || p.errObj.code || es}`, 'capped', opts.maxTokens));
+                            if (isCapErr(es)) return reject(llmErr(`${host}: max_tokens 超模型上限——${p.errObj.message || p.errObj.code || es}`, 'capped', opts.maxTokens));
                             return reject(llmErr(`${host} 返回错误：${p.errObj.message || p.errObj.code || es}`, /model/i.test(es) ? 'model' : 'http'));
                         }
                         // 无正文：finish_reason=length(或缺 finish_reason 但有思考)=思考耗尽预算(starved，应加大重试)；stop 且空=模型自愿收尾(empty，不重试)
-                        const starved = p.finishReason === 'length' || (p.finishReason == null && p.reasoning);
+                        const starved = p.finishReason === 'length' || (p.finishReason == null && p.reasoning && p.reasoning.trim());
                         return reject(llmErr(starved ? '思考耗尽 token 预算（finish_reason=length 或思考占满，正文未写完）' : '返回内容为空（仅有思考无正文）', starved ? 'starved' : 'empty'));
                     }
                     // 非 SSE：服务商忽略了 stream:true，按普通 JSON 处理（成功或错误体）
                     let d = null; try { d = JSON.parse(body); } catch (_) {}
                     if (d && d.error) {
                         const es = JSON.stringify(d.error), m = d.error.message || d.error.code || '';
-                        if (CAP_RE.test(es)) return reject(llmErr(`${host}: max_tokens 超模型上限——${m}`, 'capped', opts.maxTokens));
+                        if (isCapErr(es)) return reject(llmErr(`${host}: max_tokens 超模型上限——${m}`, 'capped', opts.maxTokens));
                         return reject(llmErr(`${host} 返回错误：${m}`, /model|UnsupportedModel/i.test(es) ? 'model' : 'http', `HTTP ${r.status}`));
                     }
                     if (r.status !== 200) {
-                        if (CAP_RE.test(String(body))) return reject(llmErr(`${host}: max_tokens 超模型上限`, 'capped', opts.maxTokens));
+                        if (isCapErr(String(body))) return reject(llmErr(`${host}: max_tokens 超模型上限`, 'capped', opts.maxTokens));
                         return reject(llmErr(`API ${r.status}: ${String(body).slice(0, 200)}`, r.status === 404 ? 'model' : 'http'));
                     }
                     const c = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
@@ -886,7 +889,7 @@
                 }
                 LOG.push('info', '已提交，等待判题…');
                 showNativeProgress(ids); // 恢复页面原生判题动画
-                const v = await pollVerdict(ids.assignID, ids.problemID, baselineTime, deadline);
+                const v = await pollVerdict(ids.assignID, ids.problemID, baselineTime, Math.max(deadline, Date.now() + 90000)); // 已提交→至少留 90s 轮询判题，别因预算耗尽 deadline 过期而丢已交结果
                 baselineTime = submitTimeOf(v && v.content) || baselineTime;
                 const sc = scoreOf(v && v.content || '');
                 res = { ok: sc.total > 0 && sc.passed === sc.total, ...sc, display, verdict: v, attempt: i + 1 };
@@ -909,10 +912,14 @@
                         LOG.push('warn', `思考耗尽 token 预算 → 自动加大 max_tokens 至 ${fmtN(versionTokens)} 重试本版`);
                         i--; continue;
                     }
-                } else if (e.kind === 'capped' && !capRetried) { // 模型不支持该 max_tokens(400)：记住上限、钳回后重试本版一次
-                    capRetried = true; setCap(host, opt.model, 8192); versionTokens = Math.min(versionTokens, 8192);
-                    LOG.push('warn', `模型 ${opt.model} 不支持该 max_tokens，已记住上限 8192 并重试本版`);
-                    i--; continue;
+                } else if (e.kind === 'capped') { // 模型不支持该 max_tokens(400)：学习其上限(被拒值减半、封顶 8192→deepseek-chat 一步到位、更小上限的模型逐版收敛)，预算够则钳回重试本版
+                    const learned = Math.max(1024, Math.min(8192, Math.floor(versionTokens / 2)));
+                    setCap(host, opt.model, learned); // 总是记住上限，避免后续问题/版本反复 400
+                    if (!capRetried && deadline - Date.now() > 30000) {
+                        capRetried = true; versionTokens = learned;
+                        LOG.push('warn', `模型 ${opt.model} 不支持该 max_tokens，已降到 ${fmtN(learned)} 并记住上限、重试本版`);
+                        i--; continue;
+                    }
                 }
                 res = { ok: false, error: e.message, passed: 0, total: 0, score: null, attempt: i + 1 };
                 LOG.push('err', `第 ${i + 1} 版失败：${e.message}`, e.extra); applyBanner(e);
@@ -1348,7 +1355,7 @@
     GM_registerMenuCommand('停止开刷 / 清除进度', () => { clearGrind(); if (grindEl) renderGrind(); if (statusEl) setStatus('已清除开刷进度。', ''); if (btnGrind) refreshButtons(); });
 
     if (typeof window !== 'undefined' && window.__CGAI_EXPOSE__) {
-        window.__CGAI_API__ = { htmlToText, titleOf, extractStatement, extractGap, extractFor, extractIds, getCur, pageType, discoverAssignList, discoverCourseID, parseAssignProblems, fetchAssignProblems, buildQueue, itemKey, parseJavaCode, detectMainClass, parseGapAnswers, parseVerdict, submitTimeOf, scoreOf, verdictError, feedbackFromHtml, buildMessages, compactMessages, planFor, parseSSE, streamStallState, callLLM, getBaseURL, autoTokens, decideRetry };
+        window.__CGAI_API__ = { htmlToText, titleOf, extractStatement, extractGap, extractFor, extractIds, getCur, pageType, discoverAssignList, discoverCourseID, parseAssignProblems, fetchAssignProblems, buildQueue, itemKey, parseJavaCode, detectMainClass, parseGapAnswers, parseVerdict, submitTimeOf, scoreOf, verdictError, feedbackFromHtml, buildMessages, compactMessages, planFor, parseSSE, streamStallState, callLLM, getBaseURL, autoTokens, decideRetry, isCapErr };
     }
 
     function boot() {

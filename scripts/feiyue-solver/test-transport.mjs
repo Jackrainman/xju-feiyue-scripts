@@ -172,9 +172,19 @@ async function t8() {
   ok('extra 记下请求的 maxTokens(32768)', err && err.extra === 32768, err && err.extra);
 }
 
+// ---- T9: 输入上下文超限 400（不是 max_tokens）→ 必须 NOT capped（否则污染 token 上限缓存）----
+async function t9() {
+  console.log('T9 输入上下文超限 400（context length，非 max_tokens）→ 不可判 capped');
+  const gm = opts => { opts.onloadstart({ response: undefined }); setImmediate(() => opts.onload({ status: 400, responseText: '{"error":{"message":"This model\\u0027s maximum context length is 64000 tokens. However, your messages resulted in 70000 tokens.","type":"invalid_request_error"}}' })); };
+  const { api } = makeCtx(gm);
+  let err = null;
+  try { await api.callLLM([{ role: 'user', content: 'x' }], { model: 'deepseek-reasoner', maxTokens: 32768 }, 'k', 5000, base()); } catch (e) { err = e; }
+  ok('reject 且 kind 不是 capped（不会被误学成上限）', err && err.kind !== 'capped', err && { msg: err.message, kind: err.kind });
+}
+
 function noopHook() {}
 function base() { return { onProgress: noopHook, onStall: noopHook, onStreamMode: noopHook, onServerError: noopHook }; }
 
-await t1(); await t2(); await t3(); await t4(); await t5(); await t6(); await t7(); await t8();
+await t1(); await t2(); await t3(); await t4(); await t5(); await t6(); await t7(); await t8(); await t9();
 console.log(`\n=== ${pass} 通过 / ${fail} 失败 ===`);
 process.exit(fail ? 1 : 0);

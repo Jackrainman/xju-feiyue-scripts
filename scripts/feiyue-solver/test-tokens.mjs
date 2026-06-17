@@ -7,7 +7,7 @@ const noop = () => {};
 const ctx = { document: { readyState: 'loading', addEventListener: noop, querySelector: () => null, getElementById: () => null, body: { innerHTML: '' }, title: '' }, location: { origin: 'http://x', pathname: '/x', search: '', href: 'http://x/' }, navigator: { userAgent: 'node' }, GM_addStyle: noop, GM_getValue: (k, d) => d, GM_setValue: noop, GM_deleteValue: noop, GM_registerMenuCommand: noop, GM_xmlhttpRequest: noop, GM_setClipboard: noop, GM_info: { script: { version: 'x' } }, TextDecoder, setTimeout, clearTimeout, setInterval, clearInterval, console, Date, JSON, Math, RegExp, String, Object, Array, Number };
 ctx.window = ctx; ctx.globalThis = ctx; ctx.window.__CGAI_EXPOSE__ = true;
 vm.createContext(ctx); vm.runInContext(src, ctx);
-const { autoTokens, decideRetry } = ctx.window.__CGAI_API__;
+const { autoTokens, decideRetry, isCapErr } = ctx.window.__CGAI_API__;
 
 let pass = 0, fail = 0;
 const ok = (n, c, x) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n, x != null ? '— ' + JSON.stringify(x) : ''); } };
@@ -27,6 +27,17 @@ ok('starved 第2次 → 不再重试(bumps 已达上限)', decideRetry('starved'
 ok('已到 65536 → next 不大于 cur，不重试', decideRetry('starved', 65536, 0).retry === false);
 ok('非 starved(empty) → 不重试', decideRetry('empty', 8192, 0).retry === false);
 ok('非 starved(capped) → 不重试', decideRetry('capped', 8192, 0).retry === false);
+
+console.log('[isCapErr] 仅真正的 max_tokens(输出)超限算 capped；输入上下文超限/限流不算(否则污染上限缓存)');
+ok('max_tokens 超限 → capped', isCapErr('max_tokens is too large: 32768. The maximum is 8192') === true);
+ok('max tokens(空格) → capped', isCapErr('Invalid max tokens value') === true);
+ok('maximum completion tokens → capped', isCapErr('maximum completion tokens exceeded') === true);
+ok('输入上下文超限 → 不 capped', isCapErr("This model's maximum context length is 64000 tokens, however you requested 70000") === false);
+ok('context length → 不 capped', isCapErr('context length exceeded') === false);
+ok('too many tokens(输入) → 不 capped', isCapErr('Input contains too many tokens') === false);
+ok('限流 reduce length → 不 capped', isCapErr('Rate limit exceeded. Please reduce the length of your request.') === false);
+ok('maximum number of tokens in context → 不 capped(NONCAP 兜底)', isCapErr('exceeds the maximum number of tokens allowed in the context window') === false);
+ok('普通模型错误 → 不 capped', isCapErr('model not found') === false);
 
 console.log(`\n=== ${pass} 通过 / ${fail} 失败 ===`);
 process.exit(fail ? 1 : 0);
