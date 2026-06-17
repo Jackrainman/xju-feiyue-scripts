@@ -1208,6 +1208,7 @@
         panel.querySelector('#cfg-maxtokens').value = (+GM_getValue(STORE.MAX_TOKENS, 0)) || '';
         panel.querySelector('#cfg-calltimeout').value = (+GM_getValue(STORE.CALL_TIMEOUT, 0)) || '';
         panel.querySelector('#cfg-budget').value = (+GM_getValue(STORE.PROBLEM_BUDGET, 0)) || '';
+        const adv = panel.querySelector('#cfg-adv'); if (adv) adv.open = false; // 高级设置默认折叠
         populateModelSelects();
         cfgMsg('');
         panel.querySelector('#cgai-config').classList.add('open');
@@ -1269,13 +1270,18 @@
                     <div class="cgai-field"><label>重试强模型（可选，失败时升级用）</label>
                         <select id="cfg-strong"></select><input id="cfg-strong-c" type="text" spellcheck="false" placeholder="自定义模型名（留空=不升级）" style="display:none">
                         <span class="hint">主模型连错 3 次以上才会调用（需"重试次数"≥3）。换强模型那版会重置单题时间预算，给思考型模型充足时间。</span></div>
-                    <div class="cgai-field"><label>高级：思考预算 / 超时（留空=自动）</label>
-                        <div style="display:flex;gap:6px">
-                            <input id="cfg-maxtokens" type="number" min="0" spellcheck="false" placeholder="max_tokens 自动" style="flex:1;min-width:0">
-                            <input id="cfg-calltimeout" type="number" min="0" spellcheck="false" placeholder="单次超时s 默认360" style="flex:1;min-width:0">
-                            <input id="cfg-budget" type="number" min="0" spellcheck="false" placeholder="单题预算s 默认900" style="flex:1;min-width:0">
-                        </div>
-                        <span class="hint">思考模型把 max_tokens 大量用于推理：留空时思考模式自动给 32768、普通 8192，不够会自动加大重试。单次超时给足长思考（默认 6 分钟），不再被单题总时钟秒杀；单题预算是"是否再起新一版"的总闸门（默认 15 分钟）。</span></div>
+                    <details class="cgai-sec" id="cfg-adv" style="margin-bottom:13px">
+                        <summary>高级设置：思考预算 / 超时（留空=自动）</summary>
+                        <div class="cgai-field" style="margin-top:11px"><label>max_tokens 上限</label>
+                            <input id="cfg-maxtokens" type="number" min="0" spellcheck="false" placeholder="留空=自动（思考 32768 / 普通 8192，不够自动加大）">
+                            <span class="hint">思考模型把 max_tokens 大量用于推理；给少了会"只思考没正文"（返回空）。留空自动，并在思考耗尽预算时自动加大重试。</span></div>
+                        <div class="cgai-field"><label>单次调用超时（秒）</label>
+                            <input id="cfg-calltimeout" type="number" min="0" spellcheck="false" placeholder="留空=默认 360（6 分钟）">
+                            <span class="hint">给足长思考、与单题总时钟解耦，不再因前一版用掉大半时间就把正在产 token 的调用秒杀。</span></div>
+                        <div class="cgai-field" style="margin-bottom:0"><label>单题总预算（秒）</label>
+                            <input id="cfg-budget" type="number" min="0" spellcheck="false" placeholder="留空=默认 900（15 分钟）">
+                            <span class="hint">"是否再起新一版"的总闸门，不会中途砍正在产 token 的调用；超时跳过会在进度里标"超时"。</span></div>
+                    </details>
                 </div>
                 <div class="cgai-btns"><button class="cgai-btn cgai-btn-primary" id="cfg-save">保存</button><button class="cgai-btn cgai-btn-ghost" id="cfg-cancel">取消</button></div>
             </div>
