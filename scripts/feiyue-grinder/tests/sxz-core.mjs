@@ -226,3 +226,28 @@ export function lettersFromTexts(qd, texts) {
   });
   return [...new Set(out)];
 }
+
+/* ===== v2.10 模型下拉(对齐 Solver/希冀):缓存+建议+「其他/自定义…」兜底 =====
+   与用户脚本一一对应。唯一改动同上：参数化——
+   - modelOptions  ← 脚本里直接读 getModelsCache()/CFG/activeProvider；这里显式收 {cache,suggest,current,providerDefault}
+   - fillModelSelect ← 脚本里 list=modelOptions() 内部算、用全局 document；这里显式收 doc 与 list
+   - pickModel     ← 完全一致 */
+export const OTHER = '__other__';
+// 去重并入建议(filter(Boolean) 去掉空串)
+export function modelOptions({ cache = [], suggest = [], current = '', providerDefault = '' } = {}) {
+  return [...new Set([...cache, ...suggest, current, providerDefault].filter(Boolean))];
+}
+// 命中→走下拉;未命中但有值→选「其他」并把值塞进文本框露出来;空值→选首项
+export function fillModelSelect(doc, sel, inp, value, list) {
+  if (!sel) return;
+  const inList = list.includes(value);
+  sel.innerHTML = '';
+  [...list, OTHER].forEach((m) => { const o = doc.createElement('option'); o.value = m; o.textContent = m === OTHER ? '其他 / 自定义…' : m; sel.appendChild(o); });
+  sel.value = inList ? value : (value ? OTHER : (list[0] || OTHER));
+  if (inp) { inp.value = inList ? '' : (value || ''); inp.style.display = sel.value === OTHER ? 'block' : 'none'; }
+}
+// 保存时取值:选「其他」读文本框、否则读下拉;都空回退 fallback
+export function pickModel(sel, inp, fallback) {
+  if (!sel) return fallback;
+  return (sel.value === OTHER ? (inp ? inp.value.trim() : '') : sel.value) || fallback;
+}
