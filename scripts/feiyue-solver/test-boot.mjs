@@ -30,7 +30,7 @@ ok('面板已建', !!$('#cgai-panel'));
 ok('铃铛存在(齿轮旁)', !!$('#cgai-bell') && !!$('#cgai-cfg'));
 ok('铃铛红点元素', !!$('#cgai-belldot'));
 ok('日志浮层存在', !!$('#cgai-log'));
-ok('复制/提issue/清空按钮齐全', !!$('#log-copy') && !!$('#log-issue') && !!$('#log-clear'));
+ok('复制/清空按钮齐全', !!$('#log-copy') && !!$('#log-clear')); // 提issue 按钮已于 v2.4.2 移除
 
 console.log('[无 Key → 新手引导]');
 ok('弹出引导 banner', $('#cgai-banners').children.length >= 1, $('#cgai-banners').textContent.slice(0, 40));
