@@ -24,7 +24,7 @@ https://feiyue.selab.top/feiyue-solver.user.js?v=222
 ## 使用
 
 1. 打开任意编程题页（或希冀任意页）：右下角出现 **飞跃·解题 Solver** 面板。**首次无 Key 时**有蓝色**悬浮箭头**指向右上角齿轮，引导你去配置。
-2. 点齿轮 / 模型按钮进入**配置页**，填 **API Base URL**（**默认 `https://api.deepseek.com`（DeepSeek 首推）**，可换 `https://aiapis.help/v1`（GPT 代理要带 `/v1`）等任意 OpenAI 兼容服务）、**API Key**（不知去哪拿？配置页给了 **GPT 系 `aiapis.help/console`** 与 **DeepSeek 系 `platform.deepseek.com`** 跳转链接），点 **刷新模型列表**（调 `<BaseURL>/models`），在**主模型 / 重试强模型下拉**里选即可，无需手敲；没有的选「其他/自定义」手填。默认主模型 `deepseek-chat`、强模型 `deepseek-reasoner`，**思考模式默认关**。
+2. 点齿轮 / 模型按钮进入**配置页**，填 **API Base URL**（**默认 `https://api.deepseek.com`（DeepSeek 首推）**，可换 `https://aiapis.help/v1`（GPT 代理要带 `/v1`）等任意 OpenAI 兼容服务）、**API Key**（不知去哪拿？配置页给了 **GPT 系 `aiapis.help/console`** 与 **DeepSeek 系 `platform.deepseek.com`** 跳转链接），点 **刷新模型列表**（调 `<BaseURL>/models`），在**主模型 / 重试强模型下拉**里选即可，无需手敲；没有的选「其他/自定义」手填。默认主模型 `deepseek-v4-flash`、强模型 `deepseek-v4-pro`，**思考模式默认关**。
 3. **解本题**：当前题一键生成并提交，显示得分。
 4. **一键开刷全部**：先读作业列表建校验队列，从第一题起串行解所有作业的所有题，自动提交、自动跳下一题。可随时**停止开刷**。
    - **失败纠错**：未满分时读取判题「错误样例」（**全部失败测试点**的期望输出 vs 实际输出），**追加到同一对话**喂回模型（**不换模型**）让其据上下文纠正后重新提交。
@@ -37,7 +37,7 @@ https://feiyue.selab.top/feiyue-solver.user.js?v=222
 ### 兼容性（rainman 实测，v2.3）
 | 服务商 | Base URL | 可用模型 |
 |---|---|---|
-| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` / `deepseek-reasoner`（默认，发 `thinking` 参数） |
+| DeepSeek | `https://api.deepseek.com` | `deepseek-v4-flash` / `deepseek-v4-pro`（默认，发 `thinking` 参数；旧 `deepseek-chat`/`deepseek-reasoner` 2026-07-24 起停用） |
 | 小米 mimo | `https://token-plan-cn.xiaomimimo.com/v1` | `mimo-v2.5-pro` 等 |
 | 火山·编程计划 | `https://ark.cn-beijing.volces.com/api/coding/v3` | ✅ `kimi-k2-250711`、`deepseek-v3-250324`；❌ `deepseek-v3-1`/`deepseek-r1`/`doubao-seed-1-6`（该 endpoint 只对部分模型开放，选错会 404 `UnsupportedModel`，脚本会提示换模型） |
 
