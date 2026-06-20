@@ -72,7 +72,7 @@ https://feiyue.selab.top/feiyue-solver.user.js?v=261
 | `feiyue-solver.user.js` | **主交付物**：脚本猫用户脚本 |
 | `harden-nginx.sh` | 部署加固：把安装链接固定从 `~/public-scripts` 提供（独立于 Aurash 构建），含 `nginx -t` + 失败回滚 |
 | `preview-gen.mjs` | 抽脚本 CSS 生成预览页（纯 node） |
-| `test-extract.mjs` | jsdom 离线单测（54 项：多题型提取 / 填空模板 / 失败反馈解析 / 版本计划 / **上下文压缩(含末尾 assistant 边界)** / 判分） |
+| `test-extract.mjs` | jsdom 离线单测（42 项：多题型提取 / 填空模板 / 失败反馈解析 / 版本计划 / 判分；上下文压缩单测见 `test-compact.mjs`） |
 | `test-stream.mjs` | **流式 SSE 解析单测**（vm 沙箱，无依赖，17 项：reasoning/content 分离、半行容错、CRLF、错误体、非 SSE 回退、**`finish_reason` 捕获**(length/stop、usage-only 尾帧不清空、全 null→null)） |
 | `test-transport.mjs` | **传输层单测**（vm 沙箱，无依赖，15 项：模拟 `responseType:'stream'` 的 `ReadableStream`(脚本猫式·永不 close) 真增量路径 + 无流时回退 `responseText` 不回归 + 非 SSE 错误体 reject + 流内 content/error 共存不吞 + 生成静默 60s 硬收口 + **思考耗尽预算→reject(`starved`)** + **stop 无正文→`empty`(不误判)** + **`max_tokens` 超限 400→reject(`capped`)** + **输入上下文超限 400→NOT `capped`**(v2.6.1)） |
 | `test-compact.mjs` | **上下文压缩单测**（vm 沙箱，无依赖，9 项：v2.5.0 保留最近两轮代码+反馈、丢更早累积、以 user 结尾、幂等性——难题多版纠错防失忆） |

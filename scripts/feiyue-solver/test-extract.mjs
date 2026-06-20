@@ -117,40 +117,7 @@ console.log('\n[模型梯队 / 判分]');
     if (v) { const sc = api.scoreOf(v.content); ok('scoreOf 5/5 得分20.00', sc.passed === 5 && sc.total === 5 && sc.score === '20.00'); }
 }
 
-console.log('\n[同题上下文压缩 compactMessages]');
-{
-    const { api } = load('pl1.html', 'http://10.109.120.139/x');
-    const prob = { kind: 'file', title: 'T', statement: '题面描述XYZ' };
-    const base = api.buildMessages(prob); // [system, 题目]
-    const acc = base.concat([
-        { role: 'assistant', content: 'CODE_V1' }, { role: 'user', content: 'FB_1' },
-        { role: 'assistant', content: 'CODE_V2' }, { role: 'user', content: 'FB_2' },
-    ]);
-    const c = api.compactMessages(acc, prob);
-    ok('压成4元', c.length === 4);
-    ok('保留 system + 题目(权威重建)', c[0].role === 'system' && c[1].role === 'user' && /题面描述XYZ/.test(c[1].content));
-    ok('只留最近一版输出 CODE_V2', c[2].role === 'assistant' && c[2].content === 'CODE_V2');
-    ok('只留最近一次反馈 FB_2', c[3].role === 'user' && c[3].content === 'FB_2');
-    ok('丢弃中间 CODE_V1 / FB_1', !c.some(m => /CODE_V1|FB_1/.test(m.content)));
-    const accBad = base.concat([
-        { role: 'assistant', content: 'GOOD' }, { role: 'user', content: 'FB' },
-        { role: 'assistant', content: '不是有效Java' }, { role: 'user', content: '上次输出有问题（生成结果不是有效 Java），请修正后重新给出完整答案。' },
-    ]);
-    const cb = api.compactMessages(accBad, prob);
-    ok('异常分支：保留无效输出 + 「上次输出有问题」提示', cb.length === 4 && /不是有效Java/.test(cb[2].content) && /上次输出有问题/.test(cb[3].content));
-    ok('压缩幂等(对应 escalate compactBefore 双触发)', JSON.stringify(api.compactMessages(c, prob)) === JSON.stringify(c));
-    ok('仅[system,题目]安全返回2元', api.compactMessages(base, prob).length === 2);
-    // 末轮贴 deadline：messages 以 assistant 结尾、无后续 user 反馈 → compactBefore 不能产出以 assistant 收尾的对话(否则强模型升级版 payload 末尾 assistant，部分服务商 400)
-    const accTail = base.concat([
-        { role: 'assistant', content: 'CODE_A' }, { role: 'user', content: 'FB_A' },
-        { role: 'assistant', content: 'CODE_TAIL' },
-    ]);
-    const ctail = api.compactMessages(accTail, prob);
-    ok('末尾 assistant：对话以 user 结束(不留 assistant 收尾)', ctail[ctail.length - 1].role === 'user');
-    ok('末尾 assistant：仍保留最近一版输出 CODE_TAIL', ctail.some(m => m.content === 'CODE_TAIL'));
-    ok('末尾 assistant：补的收尾 user 非空', ctail[ctail.length - 1].content.length > 0);
-    ok('末尾 assistant：补 user 后再压幂等', JSON.stringify(api.compactMessages(ctail, prob)) === JSON.stringify(ctail));
-}
+// compactMessages 单测已迁出到独立的 test-compact.mjs（v2.5.0 起保留最近两轮，vm 沙箱无需 fixtures）。
 
 console.log(`\n=== ${pass} 通过, ${fail} 失败 ===`);
 process.exit(fail ? 1 : 0);
