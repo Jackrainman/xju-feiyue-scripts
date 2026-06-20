@@ -6,7 +6,7 @@
 
 ```
 scripts/feiyue-solver/    飞跃·解题 Solver — CourseGrading(Java/OJ) AI 解题(原 cg-ai-solver/xiji)
-scripts/feiyue-grinder/   飞跃·刷课 Grinder — 华为实习汁(小学期)自动刷课(原 huawei-sxz-shuake)
+scripts/feiyue-grinder/   飞跃·刷课 Grinder — 华为小学期自动刷课(原 huawei-sxz-shuake)
   ├─ feiyue-grinder.user.js
   ├─ feiyue-grinder-bank/            共享云题库后端(stdlib http.server + SQLite + Docker)
   └─ tests/               jsdom + node:test
@@ -45,5 +45,5 @@ curl -A Mozilla 'https://feiyue.selab.top/feiyue-grinder.user.js?v=<版本>' | g
 ## 调试 / 部署链路
 
 - 本机 →（`ssh -p 2222 winbeau@win-wsl2`）win-wsl2 →（二跳 `ssh huawei2`）huawei2。
-- win-wsl2 上有 GUI Chrome（CDP 端口 9333）驱动华为实习汁实测；二跳 scp **要拆成单条**（链式 `&& ssh huawei2 "..."` 会超慢/超时）。
+- win-wsl2 上有 GUI Chrome（CDP 端口 9333）驱动华为小学期实测；二跳 scp **要拆成单条**（链式 `&& ssh huawei2 "..."` 会超慢/超时）。
 - 详见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。遇到问题先翻 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。

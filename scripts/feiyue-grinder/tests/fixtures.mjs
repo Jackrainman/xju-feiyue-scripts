@@ -1,7 +1,7 @@
 // ============================================================================
 // fixtures.mjs
 //
-// 用 jsdom 还原「华为实习汁」真实官方页面 DOM（基于 CDP 实测结构）。
+// 用 jsdom 还原「华为小学期」真实官方页面 DOM（基于 CDP 实测结构）。
 // 每个导出函数返回 { dom, document, root, window }，root 一般是 document.body
 // （脚本里所有 q/qa 都从 document 起，detectType/extractQuestion 也按 body 取文本）。
 //

@@ -4,7 +4,7 @@
 
 ---
 
-## 一、飞跃·刷课 Grinder（华为实习汁）架构
+## 一、飞跃·刷课 Grinder（华为小学期）架构
 
 `scripts/feiyue-grinder/feiyue-grinder.user.js`（~1260 行）。
 
@@ -81,7 +81,7 @@
 
 ## 五、CDP 调试工具（win-wsl2 `/tmp/`，开发期）
 
-win-wsl2 上 GUI Chrome（`DISPLAY=:0`，`--user-data-dir=~/.config/google-chrome-shuake`，`--remote-debugging-port=9333 --remote-allow-origins=*`），用于驱动华为实习汁实测。常用临时脚本（WSL 重启 /tmp 会清，需重建）：
+win-wsl2 上 GUI Chrome（`DISPLAY=:0`，`--user-data-dir=~/.config/google-chrome-shuake`，`--remote-debugging-port=9333 --remote-allow-origins=*`），用于驱动华为小学期实测。常用临时脚本（WSL 重启 /tmp 会清，需重建）：
 - `cdp_world.py <帧过滤>`：在指定帧的隔离世界跑 JS（`sxz-course`=顶窗 / `application-learn`=引擎帧 / `examContent`=考试帧）。
 - `cdp_open_analyze.py <url>`、`cdp_trusted_click*.py`（`Input.dispatchMouseEvent` 可信点击，window.open 弹窗只能靠它或真人）。
 - `window.__SXZ`（grinder 暴露）：`readQuestion()` 读 live 题、`state.examSrcStat` 看来源计数、`getState()`。

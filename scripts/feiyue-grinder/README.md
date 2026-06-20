@@ -2,7 +2,7 @@
 
 # 飞跃·刷课 Grinder
 
-### 华为实习汁（小学期）课程全自动刷课
+### 华为小学期课程全自动刷课
 
 <sub>feiyue-grinder · ScriptCat Userscript · XjuSelab</sub>
 
@@ -19,7 +19,7 @@
 
 ---
 
-华为实习汁（shixizhi）课程全自动刷课的脚本猫（ScriptCat）脚本。**安装 / 更新**：<https://feiyue.selab.top/feiyue-grinder.user.js>
+华为小学期（shixizhi）课程全自动刷课的脚本猫（ScriptCat）脚本。**安装 / 更新**：<https://feiyue.selab.top/feiyue-grinder.user.js>
 
 ## 功能 · Features
 

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "jsdom 离线单测：华为实习汁刷课脚本纯逻辑函数",
+  "description": "jsdom 离线单测：华为小学期刷课脚本纯逻辑函数",
   "scripts": {
     "test": "node --test"
   },
