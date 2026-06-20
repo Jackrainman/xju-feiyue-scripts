@@ -4,7 +4,7 @@
 # 新增脚本时把文件名加进下面 SCRIPTS 数组再跑一次即可。
 set -e
 CONF=/etc/nginx/sites-available/aurash-tunnel
-SCRIPTS=( feiyue-grinder.user.js feiyue-solver.user.js )
+SCRIPTS=( feiyue-grinder.user.js feiyue-solver.user.js feiyue-importer.user.js )
 
 [ -f "$CONF" ] || { echo "找不到 $CONF"; exit 1; }
 changed=0

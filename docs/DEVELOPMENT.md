@@ -1,6 +1,6 @@
 # 开发文档（DEVELOPMENT）
 
-两个脚本都是单文件 Tampermonkey IIFE（`@grant GM_*`，靠 `GM_xmlhttpRequest` 跨域调 AI/题库），通过 `feiyue.selab.top` 分发。共享代码（`callLLM`、Notion 设计令牌、lucide 图标、`makeDraggable`）目前**各脚本内联**，不抽不构建（见 [CONVENTIONS](../CONVENTIONS.md)）。
+两个 AI 脚本（`feiyue-solver` / `feiyue-grinder`）都是单文件 Tampermonkey IIFE（`@grant GM_*`，靠 `GM_xmlhttpRequest` 跨域调 AI/题库），通过 `feiyue.selab.top` 分发。共享代码（`callLLM`、Notion 设计令牌、lucide 图标、`makeDraggable`）目前**各脚本内联**，不抽不构建（见 [CONVENTIONS](../CONVENTIONS.md)）。第三个脚本 `feiyue-importer`（飞跃·导入）是 `@grant none` 的纯页面脚本（无 AI、行为等同书签），架构独立，见 [`scripts/feiyue-importer/README.md`](../scripts/feiyue-importer/README.md)。
 
 ---
 

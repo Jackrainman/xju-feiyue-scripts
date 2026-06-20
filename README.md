@@ -11,7 +11,7 @@
 [![主页](https://img.shields.io/badge/主页-selab.top-2383E2?style=flat-square&logo=githubpages&logoColor=white)](https://selab.top)
 [![飞跃手册](https://img.shields.io/badge/飞跃手册-feiyue.selab.top-0F7B6C?style=flat-square&logo=cloudflare&logoColor=white)](https://feiyue.selab.top)
 ![ScriptCat](https://img.shields.io/badge/ScriptCat-脚本猫-00485B?style=flat-square)
-![脚本](https://img.shields.io/badge/脚本-2-9065B0?style=flat-square&logo=javascript&logoColor=white)
+![脚本](https://img.shields.io/badge/脚本-3-9065B0?style=flat-square&logo=javascript&logoColor=white)
 ![Open Source](https://img.shields.io/badge/Open%20Source-by%20default-37352F?style=flat-square&logo=git&logoColor=white)
 
 </div>
@@ -28,7 +28,7 @@
 | :-- | :-- | :-- | :--: |
 | **飞跃·解题 Solver** | `feiyue-solver` | 希冀 CourseGrading（Java/OJ）AI 自动解题 → 自动提交 → 读判题；一键串行开刷、失败读样例多版本重试、自动跳题 | [![安装](https://img.shields.io/badge/安装-v2.6.1-00485B?style=flat-square)](https://feiyue.selab.top/feiyue-solver.user.js) |
 | **飞跃·刷课 Grinder** | `feiyue-grinder` | 华为实习汁（小学期）全自动刷课：视频 + 课件 + 随堂测验 + 结课考试（题库优先 + AI 兜底，自带共享云题库 `feiyue-grinder-bank`） | [![安装](https://img.shields.io/badge/安装-v2.10.0-00485B?style=flat-square)](https://feiyue.selab.top/feiyue-grinder.user.js) |
-| _飞跃·导入 import_ | — | 飞跃成绩单一键导入（**不在本仓**） | 由 [Aurash](https://github.com/winbeau/Aurash) 统一维护与部署 |
+| **飞跃·导入 Importer** | `feiyue-importer` | 新疆大学教务系统成绩单一键导入飞跃学分统计（导出 PDF → 回传 → 自动解析） | [![安装](https://img.shields.io/badge/安装-v1.6.0-00485B?style=flat-square)](https://feiyue.selab.top/feiyue-importer.user.js) |
 
 > 点「安装」徽章，脚本猫会弹出安装 / 更新页。装过的会自动检查更新（Cloudflare 边缘缓存 4h，手动强制可在链接后加 `?v=<版本>` 回源验证）。徽章上的版本号即当前发布版。
 
@@ -40,6 +40,7 @@ scripts/
   feiyue-grinder/    # 飞跃·刷课 Grinder
     └─ feiyue-grinder-bank/   # 共享云题库后端(stdlib http.server + SQLite + Docker)
     └─ tests/                 # jsdom + node:test
+  feiyue-importer/   # 飞跃·导入 Importer(教务成绩单一键导入飞跃学分统计)
 deploy/              # 本机一键部署到 feiyue 的脚本(见下)
 docs/                # 开发文档 + 踩坑记录
 ```
