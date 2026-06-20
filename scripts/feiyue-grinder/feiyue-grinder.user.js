@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         飞跃·刷课 Grinder
 // @namespace    https://feiyue.selab.top/feiyue-grinder
-// @version      2.9.15
+// @version      2.10.0
 // @updateURL    https://feiyue.selab.top/feiyue-grinder.user.js
 // @downloadURL  https://feiyue.selab.top/feiyue-grinder.user.js
 // @description  三合一全自动:视频(自动播,倍速/静音可调)+课件(滚动翻完每一页)+随堂测验(AI答题 GPT5.5/DeepSeek 可切,AI优先+题库兜底)。面板置于顶层窗口可任意拖动,引擎跑在课程 iframe 内,经 postMessage 通信。UI 全 SVG(无 emoji)。登录(短信验证码)用华为原生界面手动完成。API Key 仅存本地(GM)。
@@ -38,6 +38,8 @@
     deepseek: { label: 'DeepSeek-V4 (官方)',    baseURL: 'https://api.deepseek.com', model: 'deepseek-v4-flash' },
     custom:   { label: '自定义 OpenAI 兼容',     baseURL: '', model: '' },
   };
+  const MODEL_SUGGEST = ['gpt-5.5', 'deepseek-v4-flash', 'deepseek-v4-pro'];
+  const MODELS_CACHE_K = 'sxz_models_cache';
   const DEF = { provider: 'deepseek', keys: {}, baseURL: '', model: '', thinking: false,
     rate: 1, mute: true, autoNext: true, cwDwellSec: 8, quizAuto: true, answerSource: 'ai_bank', quizRetryMax: 2, autoFinalTest: false, antiIdle: true, force: false };
   const K = 'sxz_cfg_v2';
@@ -49,6 +51,21 @@
   function apiBase() { return (CFG.baseURL || activeProvider().baseURL || '').replace(/\/+$/, ''); }
   function apiModel() { return CFG.model || activeProvider().model; }
   function apiKey() { return (CFG.keys && CFG.keys[CFG.provider]) || ''; }
+
+  /* 模型下拉(对齐 Solver/希冀)：缓存拉取的模型 + 内置建议 + 「其他/自定义…」兜底 */
+  const OTHER = '__other__';
+  function getModelsCache() { try { return JSON.parse(GM_getValue(MODELS_CACHE_K, '[]')) || []; } catch (e) { return []; } }
+  function modelOptions() { return [...new Set([...getModelsCache(), ...MODEL_SUGGEST, CFG.model, activeProvider().model].filter(Boolean))]; }
+  function fillModelSelect(sel, inp, value) {
+    if (!sel) return;
+    const list = modelOptions(), inList = list.includes(value);
+    sel.innerHTML = '';
+    [...list, OTHER].forEach((m) => { const o = document.createElement('option'); o.value = m; o.textContent = m === OTHER ? '其他 / 自定义…' : m; sel.appendChild(o); });
+    sel.value = inList ? value : (value ? OTHER : (list[0] || OTHER));
+    if (inp) { inp.value = inList ? '' : (value || ''); inp.style.display = sel.value === OTHER ? 'block' : 'none'; }
+  }
+  function syncCustom(sel, inp) { if (!sel || !inp) return; inp.style.display = sel.value === OTHER ? 'block' : 'none'; if (sel.value === OTHER) inp.focus(); }
+  function pickModel(sel, inp, fallback) { if (!sel) return fallback; return (sel.value === OTHER ? (inp ? inp.value.trim() : '') : sel.value) || fallback; }
 
   const log = (...a) => console.log('%c[SXZ]', 'color:#0f7b6c;font-weight:bold', ...a);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -297,9 +314,11 @@
       });
     });
   }
-  function refreshModels(cb) {
-    GM_xmlhttpRequest({ method: 'GET', url: apiBase() + '/models', headers: { Authorization: 'Bearer ' + apiKey() }, responseType: 'text', timeout: 20000,
-      onload: (r) => { let ids = []; try { const d = JSON.parse(r.responseText); ids = (d.data || d.models || []).map((m) => (typeof m === 'string' ? m : m.id)).filter(Boolean); } catch (e) {} cb(ids); }, onerror: () => cb([]), ontimeout: () => cb([]) });
+  // base/key 由调用方从「实时输入框」传入(不读已保存的 CFG)——这样自定义端点未保存也能拉取;成功即缓存供下拉预填
+  function refreshModels(base, key, cb) {
+    base = (base || '').replace(/\/+$/, '');
+    GM_xmlhttpRequest({ method: 'GET', url: base + '/models', headers: { Authorization: 'Bearer ' + (key || '') }, responseType: 'text', timeout: 20000,
+      onload: (r) => { let ids = []; try { const d = JSON.parse(r.responseText); ids = (d.data || d.models || []).map((m) => (typeof m === 'string' ? m : m.id)).filter(Boolean); } catch (e) {} if (ids.length) GM_setValue(MODELS_CACHE_K, JSON.stringify(ids)); cb(ids, r.status); }, onerror: () => cb([], 0), ontimeout: () => cb([], -1) });
   }
   function bankLookup(stem) {
     if (!stem) return null;
@@ -1107,7 +1126,7 @@
       <div class="sxz-field"><label>① AI 服务</label><select id="cf-prov">${opts}</select></div>
       <div class="sxz-field"><label>② API Base URL <span class="sxz-hint">留空用预设</span></label><input id="cf-base" spellcheck="false" placeholder="https://aiapis.help/v1"></div>
       <div class="sxz-field"><label>③ API Key <span class="sxz-hint">没有? 去拿 <a href="https://aiapis.help/console" target="_blank" rel="noopener">GPT</a> · <a href="https://platform.deepseek.com" target="_blank" rel="noopener">DeepSeek</a></span></label><input id="cf-key" type="password" placeholder="sk-..."></div>
-      <div class="sxz-field"><label>④ 模型 <span class="sxz-mini" id="cf-models">${ic('refresh', 13)}刷新模型</span></label><select id="cf-modelsel" style="display:none"></select><input id="cf-model" spellcheck="false" placeholder="gpt-5.5"></div>
+      <div class="sxz-field"><label>④ 模型 <span class="sxz-mini" id="cf-models">${ic('refresh', 13)}刷新模型</span></label><select id="cf-modelsel"></select><input id="cf-model" spellcheck="false" placeholder="自定义模型名" style="display:none"></div>
       <div class="sxz-opts">
         <label class="sxz-chk"><input type="checkbox" id="cf-think">深度思考(DeepSeek)</label>
         <label class="sxz-chk"><input type="checkbox" id="cf-autonext">自动下一讲</label>
@@ -1153,8 +1172,9 @@
     const $ = (id) => panel.querySelector(id);
     const ps = $('#cf-prov');
     function fill() {
-      ps.value = CFG.provider; $('#cf-base').value = CFG.baseURL || ''; $('#cf-key').value = apiKey(); $('#cf-model').value = CFG.model || '';
-      $('#cf-model').placeholder = activeProvider().model || '模型'; $('#cf-base').placeholder = activeProvider().baseURL || 'https://...';
+      ps.value = CFG.provider; $('#cf-base').value = CFG.baseURL || ''; $('#cf-key').value = apiKey();
+      fillModelSelect($('#cf-modelsel'), $('#cf-model'), CFG.model || activeProvider().model);
+      $('#cf-base').placeholder = activeProvider().baseURL || 'https://...';
       $('#cf-think').checked = !!CFG.thinking; $('#cf-autonext').checked = CFG.autoNext; $('#cf-quizauto').checked = CFG.quizAuto;
       $('#cf-dwell').value = CFG.cwDwellSec; $('#cf-retry').value = CFG.quizRetryMax; $('#cf-final').checked = CFG.autoFinalTest; $('#cf-force').checked = !!CFG.force;
       $('#cf-src').value = CFG.answerSource; $('#cf-bank').value = GM_getValue('sxz_bank', '');
@@ -1174,12 +1194,27 @@
     $('#sxz-meta').addEventListener('click', (e) => { const c = e.target.closest('[data-act]'); if (!c) return; if (c.dataset.act === 'cfg') openCfg(true); else if (c.dataset.act === 'mute') { CFG.mute = !CFG.mute; saveCfg(); sendCmd('mute', CFG.mute); renderState(lastState); } });
     ps.onchange = () => { CFG.provider = ps.value; saveCfg(); fill(); sendCmd('cfgReload'); renderState(lastState); };
     $('#cf-save').onclick = () => {
-      CFG.provider = ps.value; CFG.baseURL = $('#cf-base').value.trim(); CFG.model = $('#cf-model').value.trim(); CFG.thinking = $('#cf-think').checked; CFG.keys[CFG.provider] = $('#cf-key').value.trim();
+      CFG.provider = ps.value; CFG.baseURL = $('#cf-base').value.trim();
+      CFG.model = pickModel($('#cf-modelsel'), $('#cf-model'), activeProvider().model);
+      if (CFG.model === activeProvider().model) CFG.model = ''; // 选中=服务商默认 → 存空,保留"跟随预设默认"语义(切服务商自动跟随,不被钉死)
+      CFG.thinking = $('#cf-think').checked; CFG.keys[CFG.provider] = $('#cf-key').value.trim();
       CFG.autoNext = $('#cf-autonext').checked; CFG.quizAuto = $('#cf-quizauto').checked; CFG.cwDwellSec = +$('#cf-dwell').value || 8; CFG.quizRetryMax = +$('#cf-retry').value || 0; CFG.autoFinalTest = $('#cf-final').checked; CFG.force = $('#cf-force').checked; CFG.answerSource = $('#cf-src').value;
       const raw = $('#cf-bank').value.trim(); try { BANK = raw ? JSON.parse(raw) : {}; GM_setValue('sxz_bank', raw); $('#sxz-cfgmsg').textContent = '✓ 已保存'; } catch (e) { $('#sxz-cfgmsg').textContent = '题库JSON格式错误,其余已存'; }
       saveCfg(); sendCmd('cfgReload'); renderState(lastState);
     };
-    $('#cf-models').onclick = () => { $('#sxz-cfgmsg').textContent = '获取模型…'; refreshModels((ids) => { const sel = $('#cf-modelsel'); if (!ids.length) { $('#sxz-cfgmsg').textContent = '无模型/失败'; return; } sel.style.display = 'block'; sel.innerHTML = ids.map((i) => `<option>${i}</option>`).join(''); sel.onchange = () => { $('#cf-model').value = sel.value; }; $('#sxz-cfgmsg').textContent = ids.length + ' 个模型,选一个'; }); };
+    $('#cf-modelsel').onchange = () => syncCustom($('#cf-modelsel'), $('#cf-model'));
+    $('#cf-models').onclick = () => {
+      const base = ($('#cf-base').value.trim() || activeProvider().baseURL || '').replace(/\/+$/, '');
+      const key = $('#cf-key').value.trim() || apiKey();
+      if (!base) { $('#sxz-cfgmsg').textContent = '先填 ② API Base URL 再刷新'; return; }
+      $('#sxz-cfgmsg').textContent = '获取模型…';
+      const cur = pickModel($('#cf-modelsel'), $('#cf-model'), '');
+      refreshModels(base, key, (ids, status) => {
+        if (!ids.length) { $('#sxz-cfgmsg').textContent = `无模型/失败(HTTP ${status};确认 Base URL 带 /v1、Key 正确、脚本猫已允许跨域)`; return; }
+        fillModelSelect($('#cf-modelsel'), $('#cf-model'), cur || ids[0]);
+        $('#sxz-cfgmsg').textContent = ids.length + ' 个模型,已填进下拉,选一个';
+      });
+    };
     $('#cf-test').onclick = async () => { $('#cf-save').click(); $('#sxz-cfgmsg').textContent = 'AI 测试中…'; try { const c = await callLLM([{ role: 'user', content: '只回复两个字:正常' }]); $('#sxz-cfgmsg').textContent = '✓ AI OK: ' + c.slice(0, 20); } catch (e) { $('#sxz-cfgmsg').textContent = '✗ ' + e.message; } };
   }
   function makeDraggable(el, h) {

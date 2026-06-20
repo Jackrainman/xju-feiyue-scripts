@@ -78,6 +78,31 @@ console.log('[parseSSE]');
         + sse({ choices: [{ delta: { content: 'c1' } }] }));
     ok('null 字段不污染', r.reasoning === 'r1' && r.content === 'c1', JSON.stringify(r));
 }
+{
+    // finish_reason：末帧 length 捕获（max_tokens 截断 → starved 判据）
+    const r = api.parseSSE(
+        sse({ choices: [{ delta: { content: 'A' }, finish_reason: null }] })
+        + sse({ choices: [{ delta: { content: 'B' }, finish_reason: 'length' }] })
+        + 'data: [DONE]\n\n');
+    ok('finishReason=length 捕获', r.finishReason === 'length', JSON.stringify(r.finishReason));
+}
+{
+    // usage-only 尾帧(choices:[])不可把已捕获的 finish_reason 清空（仅非 null 才覆盖）
+    const r = api.parseSSE(
+        sse({ choices: [{ delta: { content: 'A' }, finish_reason: 'length' }] })
+        + sse({ choices: [], usage: { total_tokens: 9 } }));
+    ok('usage-only 尾帧不清空 finishReason', r.finishReason === 'length', JSON.stringify(r.finishReason));
+}
+{
+    // 全程 finish_reason=null → 返回 null（流式中途快照，未结束）
+    const r = api.parseSSE(sse({ choices: [{ delta: { content: 'A' }, finish_reason: null }] }));
+    ok('全程 null → finishReason null', r.finishReason === null, JSON.stringify(r.finishReason));
+}
+{
+    // stop 与 length 区分（stop=模型自愿收尾，不应判 starved）
+    const r = api.parseSSE(sse({ choices: [{ delta: { content: 'A' }, finish_reason: 'stop' }] }));
+    ok('finishReason=stop', r.finishReason === 'stop', JSON.stringify(r.finishReason));
+}
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 process.exit(fail ? 1 : 0);
